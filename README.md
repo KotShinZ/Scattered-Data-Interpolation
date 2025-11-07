@@ -14,7 +14,7 @@ python src/compare_interpolation.py
 
 実行すると以下の成果物が生成されます。
 
-- `data/dummy_3d_points.csv`: 乱数で生成した 3 次元散布データセット。
+- `data/dummy_3d_points.csv`: sin 波ベースに小さなノイズを加えた 10 点の 3 次元散布データセット。
 - `output/results_summary.csv`: 各補間法の RMSE、1 次滑らかさ、2 次滑らかさ指標。
 - `output/interpolation_comparison.svg`: 上記指標を可視化した棒グラフ。
 
@@ -26,6 +26,6 @@ python src/compare_interpolation.py
 
 1. GitHub リポジトリの設定で **Pages** を有効化し、ビルド元に `main` ブランチの `docs/` ディレクトリを指定します。
 2. デプロイ完了後、公開された GitHub Pages の URL にアクセスすると `docs/index.html` がロードされます。
-3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表とグラフに結果が表示されます。
+3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表・棒グラフに加えて各補間法ごとの 3D 散布図が表示されます。
 
 Pyodide は `docs/compare_interpolation.py`（ローカルの `src/compare_interpolation.py` と同一内容）をブラウザ内に読み込んで実行するため、GitHub Pages 上でもローカルと同じ純 Python 実装を利用できます。両者を更新した際は内容が一致するようにしてください。

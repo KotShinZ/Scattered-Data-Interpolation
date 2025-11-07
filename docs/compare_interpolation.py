@@ -125,20 +125,27 @@ def inverse(a: List[List[float]]) -> List[List[float]]:
 def underlying_function(point: Point3D) -> float:
     x, y, z = point
     return (
-        math.sin(math.pi * x)
-        + math.cos(math.pi * y)
-        + 0.5 * math.sin(math.pi * z)
-        + 0.25 * (x * y + y * z + z * x)
-        + 0.1 * z * z
+        math.sin(2 * math.pi * x)
+        + 0.6 * math.sin(2 * math.pi * y)
+        + 0.3 * math.sin(2 * math.pi * z)
     )
 
 
 def generate_dataset(num_points: int, seed: int = 42) -> List[Tuple[Point3D, float]]:
     random.seed(seed)
+    if num_points <= 0:
+        return []
+
     data = []
-    for _ in range(num_points):
-        point = (random.random(), random.random(), random.random())
-        noise = random.uniform(-0.02, 0.02)
+    max_index = max(1, num_points - 1)
+    for index in range(num_points):
+        t = index / max_index
+        point = (
+            t,
+            0.5 + 0.5 * math.sin(2 * math.pi * t),
+            0.5 + 0.5 * math.cos(2 * math.pi * t),
+        )
+        noise = random.uniform(-0.01, 0.01)
         value = underlying_function(point) + noise
         data.append((point, value))
     return data
@@ -544,9 +551,16 @@ class EvaluationResult:
     rmse: float
     gradient_smoothness: float
     laplacian_smoothness: float
+    grid_points: List[Point3D]
+    grid_values: List[float]
 
 
-def evaluate_interpolator(interpolator: Interpolator, train: List[Tuple[Point3D, float]], test: List[Tuple[Point3D, float]], grid_size: int = 6) -> EvaluationResult:
+def evaluate_interpolator(
+    interpolator: Interpolator,
+    train: List[Tuple[Point3D, float]],
+    test: List[Tuple[Point3D, float]],
+    grid_size: int = 6,
+) -> EvaluationResult:
     train_points = [p for p, _ in train]
     train_values = [v for _, v in train]
     interpolator.fit(train_points, train_values)
@@ -558,10 +572,16 @@ def evaluate_interpolator(interpolator: Interpolator, train: List[Tuple[Point3D,
 
     xs, step = create_grid(grid_size)
     grid_values: Dict[Tuple[int, int, int], float] = {}
+    grid_points_list: List[Point3D] = []
+    grid_value_list: List[float] = []
     for i, x in enumerate(xs):
         for j, y in enumerate(xs):
             for k, z in enumerate(xs):
-                grid_values[(i, j, k)] = interpolator.predict((x, y, z))
+                point = (x, y, z)
+                value = interpolator.predict(point)
+                grid_values[(i, j, k)] = value
+                grid_points_list.append(point)
+                grid_value_list.append(value)
 
     gradients = finite_difference_gradients(grid_values, grid_size, step)
     gradient_smoothness = smoothness_metric_from_vectors(gradients)
@@ -575,6 +595,8 @@ def evaluate_interpolator(interpolator: Interpolator, train: List[Tuple[Point3D,
         rmse=error,
         gradient_smoothness=gradient_smoothness,
         laplacian_smoothness=laplacian_smoothness,
+        grid_points=grid_points_list,
+        grid_values=grid_value_list,
     )
 
 
@@ -656,7 +678,7 @@ def render_bar_chart_svg(results: List[EvaluationResult], output_path: str) -> N
 
 
 def run_comparison(
-    num_points: int = 60,
+    num_points: int = 10,
     seed: int = 123,
     test_ratio: float = 0.2,
     grid_size: int = 6,
@@ -724,9 +746,16 @@ def run_comparison(
             "rmse": item.rmse,
             "gradient_smoothness": item.gradient_smoothness,
             "laplacian_smoothness": item.laplacian_smoothness,
+            "grid_points": [list(point) for point in item.grid_points],
+            "grid_values": item.grid_values,
         }
         for item in results
     ]
+
+    dataset_payload = {
+        "points": [list(point) for point, _ in dataset],
+        "values": [value for _, value in dataset],
+    }
 
     return {
         "dataset_csv_path": csv_path if save_artifacts else None,
@@ -734,6 +763,7 @@ def run_comparison(
         "svg_path": svg_path if save_artifacts else None,
         "results": results_payload,
         "svg": svg_content,
+        "dataset": dataset_payload,
         "skipped": skipped,
     }
 
