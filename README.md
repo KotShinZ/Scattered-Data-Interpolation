@@ -28,4 +28,4 @@ python src/compare_interpolation.py
 2. デプロイ完了後、公開された GitHub Pages の URL にアクセスすると `docs/index.html` がロードされます。
 3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表とグラフに結果が表示されます。
 
-Pyodide により `src/compare_interpolation.py` をブラウザ内に読み込んでおり、GitHub Pages 上でもローカルと同じ純 Python 実装を利用できます。
+Pyodide は `docs/compare_interpolation.py`（ローカルの `src/compare_interpolation.py` と同一内容）をブラウザ内に読み込んで実行するため、GitHub Pages 上でもローカルと同じ純 Python 実装を利用できます。両者を更新した際は内容が一致するようにしてください。

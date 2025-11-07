@@ -84,7 +84,7 @@
     <header>
       <h1>3次元散布データ補間 手法比較 (Pyodide版)</h1>
       <p>
-        GitHub Pages上でPyodideを用いて<a href="../src/compare_interpolation.py">Pythonスクリプト</a>を読み込み、
+        GitHub Pages上でPyodideを用いて<a href="compare_interpolation.py">Pythonスクリプト</a>を読み込み、
         各補間手法をブラウザ内で実行します。「結果を計算」ボタンを押すと数十秒で結果が表示されます。
       </p>
       <button id="run-button">結果を計算</button>
@@ -129,7 +129,7 @@
           indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/",
         });
         statusEl.textContent = "Pythonスクリプトを読み込み中...";
-        const response = await fetch("../src/compare_interpolation.py");
+        const response = await fetch("compare_interpolation.py");
         if (!response.ok) {
           throw new Error("compare_interpolation.py を取得できませんでした");
         }
