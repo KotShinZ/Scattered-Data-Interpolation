@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3次元散布データ補間 手法比較</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+        background: #f5f5f5;
+        color: #222;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1rem 3rem;
+        max-width: 960px;
+        margin-inline: auto;
+        line-height: 1.6;
+        background: inherit;
+        color: inherit;
+      }
+      header {
+        margin-bottom: 2rem;
+      }
+      h1 {
+        font-size: 1.8rem;
+        margin-bottom: 0.5rem;
+      }
+      button {
+        background: #2962ff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button[disabled] {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      #status {
+        margin-top: 1rem;
+        font-weight: 600;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 1.5rem;
+        background: white;
+        color: inherit;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 0.5rem;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      thead {
+        background: #eeeeee;
+      }
+      #chart-container {
+        margin-top: 2rem;
+        background: white;
+        padding: 1rem;
+        border: 1px solid #ccc;
+        overflow-x: auto;
+      }
+      .skipped {
+        margin-top: 1.5rem;
+        background: #fff8e1;
+        border: 1px solid #ffd54f;
+        padding: 1rem;
+      }
+      code {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>3次元散布データ補間 手法比較 (Pyodide版)</h1>
+      <p>
+        GitHub Pages上でPyodideを用いて<a href="compare_interpolation.py">Pythonスクリプト</a>を読み込み、
+        各補間手法をブラウザ内で実行します。「結果を計算」ボタンを押すと数十秒で結果が表示されます。
+      </p>
+      <button id="run-button">結果を計算</button>
+      <div id="status">Pyodideを初期化中...</div>
+    </header>
+
+    <section>
+      <h2>評価指標</h2>
+      <p>
+        各手法ごとにRMSEと1次・2次滑らかさ（勾配・ラプラシアン）を計算し、小さいほど精度や滑らかさが高いとみなします。
+      </p>
+      <table id="results-table" aria-live="polite">
+        <thead>
+          <tr>
+            <th>手法</th>
+            <th>滑らかさクラス</th>
+            <th>RMSE</th>
+            <th>勾配滑らかさ</th>
+            <th>ラプラシアン滑らかさ</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="5">結果はまだ計算されていません。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div id="chart-container" aria-live="polite">チャートは結果計算後に表示されます。</div>
+      <div id="skipped" class="skipped" hidden></div>
+    </section>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const buttonEl = document.getElementById("run-button");
+      const tableBody = document.querySelector("#results-table tbody");
+      const chartContainer = document.getElementById("chart-container");
+      const skippedContainer = document.getElementById("skipped");
+
+      const pyodideReadyPromise = (async () => {
+        statusEl.textContent = "Pyodideを読み込み中...";
+        const pyodide = await loadPyodide({
+          indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/",
+        });
+        statusEl.textContent = "Pythonスクリプトを読み込み中...";
+        const response = await fetch("compare_interpolation.py");
+        if (!response.ok) {
+          throw new Error("compare_interpolation.py を取得できませんでした");
+        }
+        const code = await response.text();
+        pyodide.FS.writeFile("compare_interpolation.py", code);
+        await pyodide.runPythonAsync("import compare_interpolation");
+        statusEl.textContent = "準備完了。『結果を計算』をクリックしてください。";
+        buttonEl.disabled = false;
+        return pyodide;
+      })().catch((error) => {
+        statusEl.textContent = "初期化に失敗しました: " + error;
+        buttonEl.disabled = true;
+        throw error;
+      });
+
+      function formatNumber(value) {
+        return Number(value).toFixed(4);
+      }
+
+      function renderTableRows(results) {
+        tableBody.innerHTML = "";
+        if (!results.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 5;
+          cell.textContent = "有効な結果がありません。";
+          row.appendChild(cell);
+          tableBody.appendChild(row);
+          return;
+        }
+        for (const item of results) {
+          const row = document.createElement("tr");
+          const columns = [
+            item.method,
+            item.smoothness_class,
+            formatNumber(item.rmse),
+            formatNumber(item.gradient_smoothness),
+            formatNumber(item.laplacian_smoothness),
+          ];
+          for (const value of columns) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          tableBody.appendChild(row);
+        }
+      }
+
+      async function runComparison() {
+        buttonEl.disabled = true;
+        statusEl.textContent = "Python計算を実行中 (20〜30秒ほどかかる場合があります)...";
+        try {
+          const pyodide = await pyodideReadyPromise;
+          const resultJson = await pyodide.runPythonAsync(`import json\nfrom compare_interpolation import run_comparison\njson.dumps(run_comparison(save_artifacts=False), ensure_ascii=False)`);
+          const result = JSON.parse(resultJson);
+          renderTableRows(result.results);
+          chartContainer.innerHTML = result.svg;
+          if (result.skipped && result.skipped.length) {
+            skippedContainer.hidden = false;
+            skippedContainer.innerHTML =
+              "<strong>スキップされた手法:</strong><ul>" +
+              result.skipped
+                .map((item) => `<li><code>${item[0]}</code>: ${item[1]}</li>`)
+                .join("") +
+              "</ul>";
+          } else {
+            skippedContainer.hidden = true;
+            skippedContainer.textContent = "";
+          }
+          statusEl.textContent = "計算が完了しました。";
+        } catch (error) {
+          console.error(error);
+          statusEl.textContent = "計算に失敗しました: " + error;
+        } finally {
+          buttonEl.disabled = false;
+        }
+      }
+
+      buttonEl.addEventListener("click", runComparison);
+    </script>
+  </body>
+</html>
