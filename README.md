@@ -19,3 +19,13 @@ python src/compare_interpolation.py
 - `output/interpolation_comparison.svg`: 上記指標を可視化した棒グラフ。
 
 コンソールには各手法の要約が表示され、精度と滑らかさを比較できます。
+
+## GitHub Pages での実行
+
+リポジトリを GitHub に配置した状態で、ブラウザ上だけで補間処理を実行して結果を確認することもできます。
+
+1. GitHub リポジトリの設定で **Pages** を有効化し、ビルド元に `main` ブランチの `docs/` ディレクトリを指定します。
+2. デプロイ完了後、公開された GitHub Pages の URL にアクセスすると `docs/index.html` がロードされます。
+3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表とグラフに結果が表示されます。
+
+Pyodide により `src/compare_interpolation.py` をブラウザ内に読み込んでおり、GitHub Pages 上でもローカルと同じ純 Python 実装を利用できます。

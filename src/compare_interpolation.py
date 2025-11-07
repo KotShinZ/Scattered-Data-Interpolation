@@ -583,8 +583,7 @@ def evaluate_interpolator(interpolator: Interpolator, train: List[Tuple[Point3D,
 # ---------------------------------------------------------------------------
 
 
-def render_bar_chart_svg(results: List[EvaluationResult], output_path: str) -> None:
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+def render_bar_chart_svg_string(results: List[EvaluationResult]) -> str:
     width = 1000
     height = 600
     margin = 80
@@ -641,8 +640,14 @@ def render_bar_chart_svg(results: List[EvaluationResult], output_path: str) -> N
 
     parts.append("</svg>")
 
+    return "\n".join(parts)
+
+
+def render_bar_chart_svg(results: List[EvaluationResult], output_path: str) -> None:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    svg_content = render_bar_chart_svg_string(results)
     with open(output_path, "w", encoding="utf-8") as svg_file:
-        svg_file.write("\n".join(parts))
+        svg_file.write(svg_content)
 
 
 # ---------------------------------------------------------------------------
@@ -650,12 +655,19 @@ def render_bar_chart_svg(results: List[EvaluationResult], output_path: str) -> N
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    dataset = generate_dataset(60, seed=123)
+def run_comparison(
+    num_points: int = 60,
+    seed: int = 123,
+    test_ratio: float = 0.2,
+    grid_size: int = 6,
+    save_artifacts: bool = True,
+) -> Dict[str, object]:
+    dataset = generate_dataset(num_points, seed=seed)
     csv_path = os.path.join("data", "dummy_3d_points.csv")
-    write_csv(csv_path, dataset)
+    if save_artifacts:
+        write_csv(csv_path, dataset)
 
-    train, test = train_test_split(dataset, test_ratio=0.2)
+    train, test = train_test_split(dataset[:], test_ratio=test_ratio)
 
     interpolators: List[Interpolator] = [
         NearestNeighborInterpolator(),
@@ -675,42 +687,77 @@ def main() -> None:
     ]
 
     results: List[EvaluationResult] = []
+    skipped: List[Tuple[str, str]] = []
     for interpolator in interpolators:
         try:
-            result = evaluate_interpolator(interpolator, train[:], test[:])
+            result = evaluate_interpolator(interpolator, train[:], test[:], grid_size=grid_size)
             results.append(result)
         except ValueError as exc:
-            print(f"Skipping {interpolator.name}: {exc}")
+            skipped.append((interpolator.name, str(exc)))
 
     results_path = os.path.join("output", "results_summary.csv")
-    os.makedirs(os.path.dirname(results_path), exist_ok=True)
-    with open(results_path, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["Method", "Smoothness", "RMSE", "GradientSmoothness", "LaplacianSmoothness"])
-        for result in results:
-            writer.writerow(
-                [
-                    result.method,
-                    result.smoothness_class,
-                    f"{result.rmse:.6f}",
-                    f"{result.gradient_smoothness:.6f}",
-                    f"{result.laplacian_smoothness:.6f}",
-                ]
-            )
-
     svg_path = os.path.join("output", "interpolation_comparison.svg")
-    render_bar_chart_svg(results, svg_path)
 
-    print("Synthetic dataset written to:", csv_path)
-    print("Evaluation summary written to:", results_path)
-    print("SVG chart written to:", svg_path)
+    if save_artifacts:
+        os.makedirs(os.path.dirname(results_path), exist_ok=True)
+        with open(results_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Method", "Smoothness", "RMSE", "GradientSmoothness", "LaplacianSmoothness"])
+            for result in results:
+                writer.writerow(
+                    [
+                        result.method,
+                        result.smoothness_class,
+                        f"{result.rmse:.6f}",
+                        f"{result.gradient_smoothness:.6f}",
+                        f"{result.laplacian_smoothness:.6f}",
+                    ]
+                )
+
+        render_bar_chart_svg(results, svg_path)
+
+    svg_content = render_bar_chart_svg_string(results)
+    results_payload = [
+        {
+            "method": item.method,
+            "smoothness_class": item.smoothness_class,
+            "rmse": item.rmse,
+            "gradient_smoothness": item.gradient_smoothness,
+            "laplacian_smoothness": item.laplacian_smoothness,
+        }
+        for item in results
+    ]
+
+    return {
+        "dataset_csv_path": csv_path if save_artifacts else None,
+        "results_csv_path": results_path if save_artifacts else None,
+        "svg_path": svg_path if save_artifacts else None,
+        "results": results_payload,
+        "svg": svg_content,
+        "skipped": skipped,
+    }
+
+
+def main() -> None:
+    summary = run_comparison()
+
+    print("Synthetic dataset written to:", summary["dataset_csv_path"])
+    print("Evaluation summary written to:", summary["results_csv_path"])
+    print("SVG chart written to:", summary["svg_path"])
     print()
     print("Summary:")
-    for result in results:
+    for result in summary["results"]:
         print(
-            f"- {result.method} | {result.smoothness_class}: RMSE={result.rmse:.4f}, "
-            f"GradSmooth={result.gradient_smoothness:.4f}, LapSmooth={result.laplacian_smoothness:.4f}"
+            f"- {result['method']} | {result['smoothness_class']}: "
+            f"RMSE={result['rmse']:.4f}, "
+            f"GradSmooth={result['gradient_smoothness']:.4f}, "
+            f"LapSmooth={result['laplacian_smoothness']:.4f}"
         )
+    if summary["skipped"]:
+        print()
+        print("Skipped methods:")
+        for name, message in summary["skipped"]:
+            print(f"- {name}: {message}")
 
 
 if __name__ == "__main__":
