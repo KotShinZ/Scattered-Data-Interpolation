@@ -9,7 +9,7 @@ RBF (quintic),C1+ (radial basis),0.276170,3.016389,8.670150
 RBF (gaussian),C1+ (radial basis),1.098596,0.528425,1.869357
 RBF (multiquadric),C1+ (radial basis),1.254756,0.606553,1.203130
 RBF (inverse_multiquadric),C1+ (radial basis),1.189928,0.517829,1.604506
-RBF (thin_plate_spline),C1+ (radial basis),2.065909,2.861582,5.493269
+Thin-Plate Spline,C1 (thin-plate spline),2.065909,2.861582,5.493269
 Gaussian Process Regression,C2 (squared-exponential kernel),1.015994,0.541477,2.747626
 Ordinary Kriging,C1 (variogram-based),1.061669,0.348817,2.691951
 Universal Kriging,C1 (trend + variogram),0.529525,9.586268,0.086426

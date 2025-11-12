@@ -235,6 +235,11 @@
       const resetDatasetButton = document.getElementById("reset-dataset");
       const datasetLabel = document.getElementById("dataset-label");
 
+      if (buttonEl) {
+        buttonEl.disabled = true;
+      }
+      setAxisControlsDisabled(true);
+
       let latestResults = [];
       let latestDataset = null;
       let importedDataset = null;
@@ -244,6 +249,9 @@
         ? Boolean(surfaceOcclusionToggle.checked)
         : false;
       let latestPointSize = defaultPointSize;
+      let sessionReady = false;
+      let trainingPromise = null;
+      let predicting = false;
 
       if (pointSizeInput) {
         const parsed = Number.parseFloat(pointSizeInput.value);
@@ -260,6 +268,15 @@
         }
         const axis = (sliceAxisSelect.value || "z").toUpperCase();
         sliceValueLabel.textContent = `固定値 (${axis}):`;
+      }
+
+      function setAxisControlsDisabled(disabled) {
+        if (sliceAxisSelect) {
+          sliceAxisSelect.disabled = disabled;
+        }
+        if (sliceValueInput) {
+          sliceValueInput.disabled = disabled;
+        }
       }
 
       function updateDatasetLabel() {
@@ -362,14 +379,19 @@
         const code = await response.text();
         pyodide.FS.writeFile("compare_interpolation.py", code);
         await pyodide.runPythonAsync("import compare_interpolation");
-        statusEl.textContent = "準備完了。『結果を計算』をクリックしてください。";
-        buttonEl.disabled = false;
+        statusEl.textContent = "準備完了。データを学習しています...";
         return pyodide;
       })().catch((error) => {
         statusEl.textContent = "初期化に失敗しました: " + error;
         buttonEl.disabled = true;
         throw error;
       });
+
+      pyodideReadyPromise
+        .then(() => trainCurrentDataset())
+        .catch((error) => {
+          console.error(error);
+        });
 
       if (fileInput) {
         fileInput.addEventListener("change", async (event) => {
@@ -379,7 +401,8 @@
             importedDataset = null;
             importedDatasetName = "";
             updateDatasetLabel();
-            statusEl.textContent = "ダミーデータを使用します。";
+            statusEl.textContent = "ダミーデータを使用します。学習を実行します...";
+            await trainCurrentDataset();
             return;
           }
 
@@ -389,7 +412,8 @@
             importedDataset = parseCsvDataset(text);
             importedDatasetName = file.name;
             updateDatasetLabel();
-            statusEl.textContent = `${file.name} を読み込みました。結果を計算するとインポートしたデータを使用します。`;
+            statusEl.textContent = `${file.name} を読み込みました。学習を開始します...`;
+            await trainCurrentDataset();
           } catch (error) {
             importedDataset = null;
             importedDatasetName = "";
@@ -397,19 +421,21 @@
             const message = error instanceof Error ? error.message : String(error);
             statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
             target.value = "";
+            await trainCurrentDataset();
           }
         });
       }
 
       if (resetDatasetButton) {
-        resetDatasetButton.addEventListener("click", () => {
+        resetDatasetButton.addEventListener("click", async () => {
           importedDataset = null;
           importedDatasetName = "";
           if (fileInput) {
             fileInput.value = "";
           }
           updateDatasetLabel();
-          statusEl.textContent = "ダミーデータに戻しました。結果を計算すると付属のデータを使用します。";
+          statusEl.textContent = "ダミーデータに戻しました。再学習を実行します...";
+          await trainCurrentDataset();
         });
       }
 
@@ -621,37 +647,40 @@
           });
         });
       }
-      async function runComparison() {
-        buttonEl.disabled = true;
-        if (sliceAxisSelect) {
-          sliceAxisSelect.disabled = true;
+      async function runPredictionOnly(options = {}) {
+        if (predicting) {
+          return;
         }
-        if (sliceValueInput) {
-          sliceValueInput.disabled = true;
+        if (!sessionReady) {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
         }
-        statusEl.textContent = "Python計算を実行中 (20〜30秒ほどかかる場合があります)...";
+        predicting = true;
+        const disableControls = !options.fromTraining;
+        if (buttonEl) {
+          buttonEl.disabled = true;
+        }
+        if (disableControls) {
+          setAxisControlsDisabled(true);
+        }
+        statusEl.textContent = options.fromTraining
+          ? "学習済みモデルでpredictを実行中..."
+          : "Python計算を実行中 (predictのみ)...";
         let pyodide;
         try {
           pyodide = await pyodideReadyPromise;
           const chosenAxis = sliceAxisSelect ? sliceAxisSelect.value || "z" : "z";
           const rawValue = sliceValueInput ? Number.parseFloat(sliceValueInput.value) : NaN;
           const sliceValue = Number.isFinite(rawValue) ? rawValue : null;
-          pyodide.globals.set("PY_DATASET", importedDataset ? importedDataset : null);
           pyodide.globals.set("PY_SLICE_AXIS", chosenAxis);
           pyodide.globals.set("PY_SLICE_VALUE", sliceValue);
           const pythonCode = `import json
-from compare_interpolation import run_comparison, normalize_dataset
+from compare_interpolation import predict_session
 
 slice_axis = globals().get("PY_SLICE_AXIS") or "z"
 slice_value = globals().get("PY_SLICE_VALUE")
-dataset_input = None
-dataset_candidate = globals().get("PY_DATASET")
-if dataset_candidate is not None:
-    if hasattr(dataset_candidate, "to_py"):
-        dataset_candidate = dataset_candidate.to_py()
-    dataset_input = normalize_dataset(dataset_candidate)
 
-json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axis=slice_axis, slice_value=slice_value), ensure_ascii=False)`;
+json.dumps(predict_session(slice_axis=slice_axis, slice_value=slice_value), ensure_ascii=False)`;
           const resultJson = await pyodide.runPythonAsync(pythonCode);
           const result = JSON.parse(resultJson);
           latestResults = Array.isArray(result.results) ? result.results : [];
@@ -660,7 +689,7 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axi
             ? Boolean(surfaceOcclusionToggle.checked)
             : false;
           renderTableRows(latestResults);
-          chartContainer.innerHTML = result.svg;
+          chartContainer.innerHTML = result.svg || "チャートを生成できませんでした。";
           if (latestDataset && latestResults.length) {
             render3DPlots(latestResults, latestDataset);
           } else {
@@ -669,14 +698,12 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axi
           if (sliceAxisSelect) {
             const axisFromResult = result.slice_axis || chosenAxis;
             sliceAxisSelect.value = axisFromResult;
-            sliceAxisSelect.disabled = false;
           }
           if (sliceValueInput) {
             const valueFromResult = Number(result.slice_value);
             if (Number.isFinite(valueFromResult)) {
               sliceValueInput.value = String(valueFromResult);
             }
-            sliceValueInput.disabled = false;
           }
           updateSliceValueLabel();
           if (result.skipped && result.skipped.length) {
@@ -694,30 +721,74 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axi
           const datasetSource = result.dataset_source || (result.dataset && result.dataset.source);
           if (datasetSource === "custom") {
             const label = importedDatasetName || "インポートデータ";
-            statusEl.textContent = `${label} を使って計算が完了しました。`;
+            statusEl.textContent = `${label} でpredictが完了しました。`;
           } else {
-            statusEl.textContent = "ダミーデータで計算が完了しました。";
+            statusEl.textContent = "ダミーデータでpredictが完了しました。";
           }
         } catch (error) {
           console.error(error);
           statusEl.textContent = "計算に失敗しました: " + error;
         } finally {
+          predicting = false;
           if (pyodide) {
-            pyodide.globals.set("PY_DATASET", null);
             pyodide.globals.set("PY_SLICE_AXIS", null);
             pyodide.globals.set("PY_SLICE_VALUE", null);
           }
-          if (sliceAxisSelect) {
-            sliceAxisSelect.disabled = false;
+          if (buttonEl) {
+            buttonEl.disabled = !sessionReady;
           }
-          if (sliceValueInput) {
-            sliceValueInput.disabled = false;
-          }
-          buttonEl.disabled = false;
+          setAxisControlsDisabled(!sessionReady);
         }
       }
 
-      buttonEl.addEventListener("click", runComparison);
+      async function trainCurrentDataset() {
+        if (trainingPromise) {
+          await trainingPromise;
+          return trainCurrentDataset();
+        }
+        trainingPromise = (async () => {
+          sessionReady = false;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          setAxisControlsDisabled(true);
+          const label = importedDataset ? importedDatasetName || "インポートデータ" : "ダミーデータ";
+          statusEl.textContent = `${label} を用いて学習中...`;
+          let pyodide;
+          try {
+            pyodide = await pyodideReadyPromise;
+            pyodide.globals.set("PY_DATASET", importedDataset ? importedDataset : null);
+            await pyodide.runPythonAsync(`from compare_interpolation import fit_session, normalize_dataset
+dataset_candidate = globals().get("PY_DATASET")
+dataset_input = None
+if dataset_candidate is not None:
+    if hasattr(dataset_candidate, "to_py"):
+        dataset_candidate = dataset_candidate.to_py()
+    dataset_input = normalize_dataset(dataset_candidate)
+fit_session(dataset=dataset_input)
+`);
+            sessionReady = true;
+            statusEl.textContent = `${label} の学習が完了しました。指定した平面でpredictを実行します。`;
+            await runPredictionOnly({ fromTraining: true });
+          } catch (error) {
+            console.error(error);
+            statusEl.textContent = "学習に失敗しました: " + error;
+            sessionReady = false;
+          } finally {
+            if (pyodide) {
+              pyodide.globals.set("PY_DATASET", null);
+            }
+            if (!sessionReady && buttonEl) {
+              buttonEl.disabled = true;
+            }
+            trainingPromise = null;
+          }
+        })();
+        await trainingPromise;
+        return;
+      }
+
+      buttonEl.addEventListener("click", runPredictionOnly);
       if (sliceAxisSelect) {
         sliceAxisSelect.addEventListener("change", updateSliceValueLabel);
       }

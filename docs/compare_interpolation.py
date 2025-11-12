@@ -426,6 +426,16 @@ class RBFInterpolator(Interpolator):
         return sum(values)
 
 
+class ThinPlateSplineInterpolator(RBFInterpolator):
+    """Thin-plate spline specialization with a user-friendly label."""
+
+    name = "Thin-Plate Spline"
+    smoothness_class = "C1 (thin-plate spline)"
+
+    def __init__(self, regularization: float = 1e-6) -> None:
+        super().__init__("thin_plate_spline", regularization=regularization)
+
+
 # ---------------------------------------------------------------------------
 # Gaussian process and kriging-style interpolators
 # ---------------------------------------------------------------------------
@@ -654,6 +664,32 @@ class EvaluationResult:
     slice_matrix: List[List[float]]
 
 
+@dataclass
+class TrainedMethod:
+    interpolator: Interpolator
+    method: str
+    smoothness_class: str
+    rmse: float
+    gradient_smoothness: float
+    laplacian_smoothness: float
+    grid_points: List[Point3D]
+    grid_values: List[float]
+
+
+@dataclass
+class ComparisonSession:
+    dataset: List[Tuple[Point3D, float]]
+    dataset_source: str
+    axis_bounds: List[Tuple[float, float]]
+    grid_axes: List[List[float]]
+    grid_size: int
+    methods: List[TrainedMethod]
+    skipped: List[Tuple[str, str]]
+
+
+ACTIVE_SESSION: Optional[ComparisonSession] = None
+
+
 def evaluate_interpolator(
     interpolator: Interpolator,
     train: List[Tuple[Point3D, float]],
@@ -748,11 +784,309 @@ def evaluate_interpolator(
 
 
 # ---------------------------------------------------------------------------
+# Session management helpers
+# ---------------------------------------------------------------------------
+
+
+def create_interpolators() -> List[Interpolator]:
+    return [
+        NearestNeighborInterpolator(),
+        KNNUniformInterpolator(k=4),
+        InverseDistanceWeightingInterpolator(),
+        LinearRegressionInterpolator(),
+        RBFInterpolator("linear"),
+        RBFInterpolator("cubic"),
+        RBFInterpolator("quintic"),
+        RBFInterpolator("gaussian", epsilon=1.5),
+        RBFInterpolator("multiquadric", epsilon=1.0),
+        RBFInterpolator("inverse_multiquadric", epsilon=1.0),
+        ThinPlateSplineInterpolator(),
+        GaussianProcessInterpolator(length_scale=0.35),
+        OrdinaryKrigingInterpolator(),
+        UniversalKrigingInterpolator(),
+    ]
+
+
+def compute_grid_axes(
+    axis_bounds: Sequence[Tuple[float, float]],
+    grid_size: int,
+) -> Tuple[List[List[float]], List[float]]:
+    grid_axes: List[List[float]] = []
+    axis_steps: List[float] = []
+    for lower, upper in axis_bounds:
+        values, step = create_grid(grid_size, lower, upper)
+        grid_axes.append(values)
+        axis_steps.append(step if step > 0 else 1.0)
+    return grid_axes, axis_steps
+
+
+def compute_grid_predictions(
+    interpolator: Interpolator,
+    grid_axes: Sequence[Sequence[float]],
+) -> Tuple[List[Point3D], List[float], Dict[Tuple[int, int, int], float]]:
+    xs, ys, zs = grid_axes
+    grid_values: Dict[Tuple[int, int, int], float] = {}
+    grid_points_list: List[Point3D] = []
+    grid_value_list: List[float] = []
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            for k, z in enumerate(zs):
+                point = (x, y, z)
+                value = interpolator.predict(point)
+                grid_values[(i, j, k)] = value
+                grid_points_list.append(point)
+                grid_value_list.append(value)
+    return grid_points_list, grid_value_list, grid_values
+
+
+def train_single_interpolator(
+    interpolator: Interpolator,
+    train: List[Tuple[Point3D, float]],
+    test: List[Tuple[Point3D, float]],
+    grid_axes: Sequence[Sequence[float]],
+    axis_steps: Sequence[float],
+    grid_size: int,
+) -> TrainedMethod:
+    train_points = [p for p, _ in train]
+    train_values = [v for _, v in train]
+    interpolator.fit(train_points, train_values)
+
+    test_points = [p for p, _ in test]
+    test_values = [v for _, v in test]
+    predictions = [interpolator.predict(p) for p in test_points]
+    error = rmse(predictions, test_values)
+
+    grid_points, grid_value_list, grid_values_dict = compute_grid_predictions(
+        interpolator, grid_axes
+    )
+
+    step_tuple = (
+        axis_steps[0],
+        axis_steps[1],
+        axis_steps[2],
+    )
+
+    gradients = finite_difference_gradients(grid_values_dict, grid_size, step_tuple)
+    gradient_smoothness = smoothness_metric_from_vectors(gradients)
+
+    laplacians = finite_difference_laplacian(grid_values_dict, grid_size, step_tuple)
+    laplacian_smoothness = smoothness_metric_from_scalars(laplacians)
+
+    return TrainedMethod(
+        interpolator=interpolator,
+        method=getattr(interpolator, "name", interpolator.__class__.__name__),
+        smoothness_class=getattr(interpolator, "smoothness_class", ""),
+        rmse=error,
+        gradient_smoothness=gradient_smoothness,
+        laplacian_smoothness=laplacian_smoothness,
+        grid_points=grid_points,
+        grid_values=grid_value_list,
+    )
+
+
+def build_dataset_payload(
+    dataset_list: Sequence[Tuple[Point3D, float]],
+    dataset_source: str,
+    axis_bounds: Sequence[Tuple[float, float]],
+) -> Dict[str, object]:
+    return {
+        "points": [list(point) for point, _ in dataset_list],
+        "values": [value for _, value in dataset_list],
+        "source": dataset_source,
+        "axis_bounds": list(axis_bounds),
+    }
+
+
+def serialize_results(results: List[EvaluationResult]) -> List[Dict[str, object]]:
+    payload: List[Dict[str, object]] = []
+    for item in results:
+        payload.append(
+            {
+                "method": item.method,
+                "smoothness_class": item.smoothness_class,
+                "rmse": item.rmse,
+                "gradient_smoothness": item.gradient_smoothness,
+                "laplacian_smoothness": item.laplacian_smoothness,
+                "grid_points": [list(point) for point in item.grid_points],
+                "grid_values": item.grid_values[:],
+                "slice": {
+                    "axis": item.slice_axis.lower(),
+                    "axis_label": item.slice_fixed_label,
+                    "value": item.slice_value,
+                    "axis1_label": item.slice_axis1_label,
+                    "axis2_label": item.slice_axis2_label,
+                    "axis1_values": item.slice_axis1_values,
+                    "axis2_values": item.slice_axis2_values,
+                    "matrix": item.slice_matrix,
+                },
+            }
+        )
+    return payload
+
+
+def compute_prediction(
+    session: ComparisonSession,
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
+) -> Tuple[List[EvaluationResult], str, float]:
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    normalized_axis = (slice_axis or "z").lower()
+    drop_index = axis_lookup.get(normalized_axis, 2)
+    axis_values = session.grid_axes[drop_index][:]
+    if axis_values:
+        default_slice_value = axis_values[len(axis_values) // 2]
+        min_bound = axis_values[0]
+        max_bound = axis_values[-1]
+    else:
+        default_slice_value = 0.0
+        min_bound = 0.0
+        max_bound = 1.0
+
+    if (
+        slice_value is not None
+        and isinstance(slice_value, (int, float))
+        and math.isfinite(slice_value)
+    ):
+        candidate = float(slice_value)
+        if min_bound <= max_bound:
+            resolved_slice_value = max(min(candidate, max_bound), min_bound)
+        else:
+            resolved_slice_value = candidate
+    else:
+        resolved_slice_value = default_slice_value
+
+    keep_indices = [index for index in range(3) if index != drop_index]
+    axis1_index, axis2_index = keep_indices
+    axis1_values = session.grid_axes[axis1_index][:]
+    axis2_values = session.grid_axes[axis2_index][:]
+
+    results: List[EvaluationResult] = []
+    for method in session.methods:
+        slice_matrix: List[List[float]] = []
+        for axis2 in axis2_values:
+            row: List[float] = []
+            for axis1 in axis1_values:
+                coords = [0.0, 0.0, 0.0]
+                coords[axis1_index] = axis1
+                coords[axis2_index] = axis2
+                coords[drop_index] = resolved_slice_value
+                row.append(method.interpolator.predict(tuple(coords)))
+            slice_matrix.append(row)
+
+        results.append(
+            EvaluationResult(
+                method=method.method,
+                smoothness_class=method.smoothness_class,
+                rmse=method.rmse,
+                gradient_smoothness=method.gradient_smoothness,
+                laplacian_smoothness=method.laplacian_smoothness,
+                grid_points=method.grid_points,
+                grid_values=method.grid_values,
+                slice_axis=AXIS_LABELS[drop_index],
+                slice_value=resolved_slice_value,
+                slice_axis1_label=AXIS_LABELS[axis1_index],
+                slice_axis2_label=AXIS_LABELS[axis2_index],
+                slice_fixed_label=AXIS_LABELS[drop_index],
+                slice_axis1_values=axis1_values,
+                slice_axis2_values=axis2_values,
+                slice_matrix=slice_matrix,
+            )
+        )
+
+    return results, normalized_axis, resolved_slice_value
+
+
+def fit_session(
+    dataset: Optional[Sequence[Tuple[Point3D, float]]] = None,
+    *,
+    num_points: int = 10,
+    seed: int = 123,
+    test_ratio: float = 0.2,
+    grid_size: int = 6,
+) -> ComparisonSession:
+    if dataset is None:
+        dataset_list = generate_dataset(num_points, seed=seed)
+        dataset_source = "synthetic"
+    else:
+        dataset_list = normalize_dataset(dataset)
+        dataset_source = "custom"
+
+    axis_bounds = compute_axis_bounds([point for point, _ in dataset_list])
+    grid_axes, axis_steps = compute_grid_axes(axis_bounds, grid_size)
+    train, test = train_test_split(dataset_list[:], test_ratio=test_ratio)
+
+    methods: List[TrainedMethod] = []
+    skipped: List[Tuple[str, str]] = []
+    for interpolator in create_interpolators():
+        try:
+            trained = train_single_interpolator(
+                interpolator,
+                train[:],
+                test[:],
+                grid_axes,
+                axis_steps,
+                grid_size,
+            )
+            methods.append(trained)
+        except ValueError as exc:
+            skipped.append((interpolator.name, str(exc)))
+
+    session = ComparisonSession(
+        dataset=dataset_list,
+        dataset_source=dataset_source,
+        axis_bounds=list(axis_bounds),
+        grid_axes=grid_axes,
+        grid_size=grid_size,
+        methods=methods,
+        skipped=skipped,
+    )
+
+    global ACTIVE_SESSION
+    ACTIVE_SESSION = session
+    return session
+
+
+def predict_session(
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
+    *,
+    session: Optional[ComparisonSession] = None,
+) -> Dict[str, object]:
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    results, normalized_axis, resolved_value = compute_prediction(
+        active_session, slice_axis, slice_value
+    )
+
+    dataset_payload = build_dataset_payload(
+        active_session.dataset,
+        active_session.dataset_source,
+        active_session.axis_bounds,
+    )
+    svg_content = render_bar_chart_svg_string(results) if results else ""
+
+    return {
+        "results": serialize_results(results),
+        "svg": svg_content,
+        "dataset": dataset_payload,
+        "skipped": active_session.skipped,
+        "dataset_source": active_session.dataset_source,
+        "slice_axis": normalized_axis,
+        "slice_value": resolved_value,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Visualization (SVG chart)
 # ---------------------------------------------------------------------------
 
 
 def render_bar_chart_svg_string(results: List[EvaluationResult]) -> str:
+    if not results:
+        return "<svg xmlns='http://www.w3.org/2000/svg' width='600' height='200'><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle'>No results available</text></svg>"
+
     width = 1000
     height = 600
     margin = 80
@@ -834,69 +1168,27 @@ def run_comparison(
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
 ) -> Dict[str, object]:
+    session = fit_session(
+        dataset=dataset,
+        num_points=num_points,
+        seed=seed,
+        test_ratio=test_ratio,
+        grid_size=grid_size,
+    )
     if dataset is None:
-        dataset_list = generate_dataset(num_points, seed=seed)
-        dataset_source = "synthetic"
         csv_path = os.path.join("data", "dummy_3d_points.csv")
         if save_artifacts:
-            write_csv(csv_path, dataset_list)
+            write_csv(csv_path, session.dataset)
     else:
-        dataset_list = normalize_dataset(dataset)
-        dataset_source = "custom"
         csv_path = None
 
-    points_only = [point for point, _ in dataset_list]
-    axis_bounds = compute_axis_bounds(points_only)
-    axis_lookup = {"x": 0, "y": 1, "z": 2}
-    normalized_axis = (slice_axis or "z").lower()
-    drop_index = axis_lookup.get(normalized_axis, 2)
-    bounds_min, bounds_max = axis_bounds[drop_index]
-    default_slice_value = (bounds_min + bounds_max) / 2.0
-    if slice_value is None or not isinstance(slice_value, (int, float)) or not math.isfinite(slice_value):
-        resolved_slice_value = default_slice_value
-    else:
-        resolved_slice_value = float(slice_value)
-
-    train, test = train_test_split(dataset_list[:], test_ratio=test_ratio)
-
-    interpolators: List[Interpolator] = [
-        NearestNeighborInterpolator(),
-        KNNUniformInterpolator(k=4),
-        InverseDistanceWeightingInterpolator(),
-        LinearRegressionInterpolator(),
-        RBFInterpolator("linear"),
-        RBFInterpolator("cubic"),
-        RBFInterpolator("quintic"),
-        RBFInterpolator("gaussian", epsilon=1.5),
-        RBFInterpolator("multiquadric", epsilon=1.0),
-        RBFInterpolator("inverse_multiquadric", epsilon=1.0),
-        RBFInterpolator("thin_plate_spline"),
-        GaussianProcessInterpolator(length_scale=0.35),
-        OrdinaryKrigingInterpolator(),
-        UniversalKrigingInterpolator(),
-    ]
-
-    results: List[EvaluationResult] = []
-    skipped: List[Tuple[str, str]] = []
-    for interpolator in interpolators:
-        try:
-            result = evaluate_interpolator(
-                interpolator,
-                train[:],
-                test[:],
-                grid_size=grid_size,
-                axis_bounds=axis_bounds,
-                slice_axis=normalized_axis,
-                slice_value=resolved_slice_value,
-            )
-            results.append(result)
-        except ValueError as exc:
-            skipped.append((interpolator.name, str(exc)))
-
+    results, normalized_axis, resolved_slice_value = compute_prediction(
+        session, slice_axis, slice_value
+    )
     results_path = os.path.join("output", "results_summary.csv")
     svg_path = os.path.join("output", "interpolation_comparison.svg")
 
-    if save_artifacts:
+    if save_artifacts and results:
         os.makedirs(os.path.dirname(results_path), exist_ok=True)
         with open(results_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
@@ -914,46 +1206,24 @@ def run_comparison(
 
         render_bar_chart_svg(results, svg_path)
 
-    svg_content = render_bar_chart_svg_string(results)
-    results_payload = [
-        {
-            "method": item.method,
-            "smoothness_class": item.smoothness_class,
-            "rmse": item.rmse,
-            "gradient_smoothness": item.gradient_smoothness,
-            "laplacian_smoothness": item.laplacian_smoothness,
-            "grid_points": [list(point) for point in item.grid_points],
-            "grid_values": item.grid_values,
-            "slice": {
-                "axis": normalized_axis,
-                "axis_label": item.slice_fixed_label,
-                "value": item.slice_value,
-                "axis1_label": item.slice_axis1_label,
-                "axis2_label": item.slice_axis2_label,
-                "axis1_values": item.slice_axis1_values,
-                "axis2_values": item.slice_axis2_values,
-                "matrix": item.slice_matrix,
-            },
-        }
-        for item in results
-    ]
+    svg_content = render_bar_chart_svg_string(results) if results else ""
+    results_payload = serialize_results(results)
+    dataset_payload = build_dataset_payload(
+        session.dataset, session.dataset_source, session.axis_bounds
+    )
 
-    dataset_payload = {
-        "points": [list(point) for point, _ in dataset_list],
-        "values": [value for _, value in dataset_list],
-        "source": dataset_source,
-        "axis_bounds": axis_bounds,
-    }
+    results_csv_actual = results_path if save_artifacts and results else None
+    svg_path_actual = svg_path if save_artifacts and results else None
 
     return {
         "dataset_csv_path": csv_path if save_artifacts else None,
-        "results_csv_path": results_path if save_artifacts else None,
-        "svg_path": svg_path if save_artifacts else None,
+        "results_csv_path": results_csv_actual,
+        "svg_path": svg_path_actual,
         "results": results_payload,
         "svg": svg_content,
         "dataset": dataset_payload,
-        "skipped": skipped,
-        "dataset_source": dataset_source,
+        "skipped": session.skipped,
+        "dataset_source": session.dataset_source,
         "slice_axis": normalized_axis,
         "slice_value": resolved_slice_value,
     }
