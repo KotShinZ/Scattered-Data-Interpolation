@@ -580,14 +580,13 @@
         let pyodide;
         try {
           pyodide = await pyodideReadyPromise;
-          pyodide.globals.set("JS_DATASET", importedDataset ? importedDataset : null);
+          pyodide.globals.set("PY_DATASET", importedDataset ? importedDataset : null);
           const pythonCode = `import json
-from js import JS_DATASET
 from compare_interpolation import run_comparison, normalize_dataset
 
 dataset_input = None
-if JS_DATASET is not None:
-    dataset_candidate = JS_DATASET
+dataset_candidate = globals().get("PY_DATASET")
+if dataset_candidate is not None:
     if hasattr(dataset_candidate, "to_py"):
         dataset_candidate = dataset_candidate.to_py()
     dataset_input = normalize_dataset(dataset_candidate)
@@ -629,7 +628,7 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input), ensure_a
           statusEl.textContent = "計算に失敗しました: " + error;
         } finally {
           if (pyodide) {
-            pyodide.globals.set("JS_DATASET", null);
+            pyodide.globals.set("PY_DATASET", null);
           }
           dimensionSelect.disabled = !(latestDataset && latestResults.length);
           buttonEl.disabled = false;
