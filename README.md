@@ -26,6 +26,7 @@ python src/compare_interpolation.py
 
 1. GitHub リポジトリの設定で **Pages** を有効化し、ビルド元に `main` ブランチの `docs/` ディレクトリを指定します。
 2. デプロイ完了後、公開された GitHub Pages の URL にアクセスすると `docs/index.html` がロードされます。
-3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表・棒グラフに加えて各補間法ごとの 3D 散布図が表示されます。
+3. ページ上の「結果を計算」ボタンを押すと Pyodide 上で Python が実行され、表・棒グラフに加えて各補間法ごとの 3D サーフェスが表示されます。
+   ドロップダウンで押しつぶす軸を選べば、その軸方向を平均化した 2 次元サーフェス（例: Z 軸を押しつぶして X-Y 平面に展開）を切り替えられます。
 
 Pyodide は `docs/compare_interpolation.py`（ローカルの `src/compare_interpolation.py` と同一内容）をブラウザ内に読み込んで実行するため、GitHub Pages 上でもローカルと同じ純 Python 実装を利用できます。両者を更新した際は内容が一致するようにしてください。

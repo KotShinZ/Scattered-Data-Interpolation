@@ -42,6 +42,29 @@
         opacity: 0.6;
         cursor: progress;
       }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-top: 1rem;
+      }
+      label {
+        font-weight: 600;
+      }
+      select {
+        min-width: 120px;
+        padding: 0.4rem 0.6rem;
+        border-radius: 4px;
+        border: 1px solid #888;
+        background: white;
+        color: inherit;
+        font-size: 1rem;
+      }
+      select:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
       #status {
         margin-top: 1rem;
         font-weight: 600;
@@ -116,6 +139,17 @@
       </p>
       <button id="run-button">結果を計算</button>
       <div id="status">Pyodideを初期化中...</div>
+      <div class="controls">
+        <label for="flatten-dimension">押しつぶす軸:</label>
+        <select id="flatten-dimension" disabled>
+          <option value="x">X 軸</option>
+          <option value="y">Y 軸</option>
+          <option value="z" selected>Z 軸</option>
+        </select>
+        <p style="margin: 0; font-size: 0.95rem;">
+          選択した軸方向の情報を平均化して 2 次元サーフェスとして描画します。
+        </p>
+      </div>
     </header>
 
     <section>
@@ -151,6 +185,10 @@
       const chartContainer = document.getElementById("chart-container");
       const plotsContainer = document.getElementById("plots-container");
       const skippedContainer = document.getElementById("skipped");
+      const dimensionSelect = document.getElementById("flatten-dimension");
+
+      let latestResults = [];
+      let latestDataset = null;
 
       const pyodideReadyPromise = (async () => {
         statusEl.textContent = "Pyodideを読み込み中...";
@@ -207,7 +245,98 @@
         }
       }
 
-      function render3DPlots(results, dataset) {
+      const axisNameList = ["X", "Y", "Z"];
+
+      function computeFlattenedSurface(gridPoints, gridValues, flattenAxis) {
+        const axisIndex = { x: 0, y: 1, z: 2 };
+        const dropIndex = axisIndex[flattenAxis] ?? 2;
+        const keepIndices = [0, 1, 2].filter((idx) => idx !== dropIndex);
+        const axis1Index = keepIndices[0];
+        const axis2Index = keepIndices[1];
+        const normalize = (value) => Number.parseFloat(Number(value).toFixed(6));
+
+        const axis1Set = new Set();
+        const axis2Set = new Set();
+        const aggregator = new Map();
+
+        gridPoints.forEach((coords, idx) => {
+          if (!Array.isArray(coords) || coords.length < 3) {
+            return;
+          }
+          const value = Number(gridValues[idx]);
+          if (!Number.isFinite(value)) {
+            return;
+          }
+          const axis1Val = normalize(coords[axis1Index]);
+          const axis2Val = normalize(coords[axis2Index]);
+          const key = `${axis1Val}|${axis2Val}`;
+          axis1Set.add(axis1Val);
+          axis2Set.add(axis2Val);
+          if (!aggregator.has(key)) {
+            aggregator.set(key, { sum: 0, count: 0, axis1: axis1Val, axis2: axis2Val });
+          }
+          const entry = aggregator.get(key);
+          entry.sum += value;
+          entry.count += 1;
+        });
+
+        const axis1Values = Array.from(axis1Set).sort((a, b) => a - b);
+        const axis2Values = Array.from(axis2Set).sort((a, b) => a - b);
+        if (!axis1Values.length || !axis2Values.length) {
+          return null;
+        }
+        const axis1IndexMap = new Map(axis1Values.map((value, i) => [value, i]));
+        const axis2IndexMap = new Map(axis2Values.map((value, i) => [value, i]));
+
+        const zMatrix = axis2Values.map(() => axis1Values.map(() => null));
+        aggregator.forEach((entry) => {
+          const col = axis1IndexMap.get(entry.axis1);
+          const row = axis2IndexMap.get(entry.axis2);
+          if (col === undefined || row === undefined || entry.count === 0) {
+            return;
+          }
+          zMatrix[row][col] = entry.sum / entry.count;
+        });
+
+        return {
+          axis1Label: axisNameList[axis1Index],
+          axis2Label: axisNameList[axis2Index],
+          flattenedLabel: axisNameList[dropIndex],
+          axis1Values,
+          axis2Values,
+          zMatrix,
+        };
+      }
+
+      function projectDataset(dataset, flattenAxis) {
+        const axisIndex = { x: 0, y: 1, z: 2 };
+        const dropIndex = axisIndex[flattenAxis] ?? 2;
+        const keepIndices = [0, 1, 2].filter((idx) => idx !== dropIndex);
+        const axis1Index = keepIndices[0];
+        const axis2Index = keepIndices[1];
+        const normalize = (value) => Number.parseFloat(Number(value).toFixed(6));
+
+        const projected = { x: [], y: [], z: [] };
+        if (!dataset || !Array.isArray(dataset.points) || !Array.isArray(dataset.values)) {
+          return projected;
+        }
+
+        dataset.points.forEach((point, idx) => {
+          if (!Array.isArray(point) || point.length < 3) {
+            return;
+          }
+          const value = Number(dataset.values[idx]);
+          if (!Number.isFinite(value)) {
+            return;
+          }
+          projected.x.push(normalize(point[axis1Index]));
+          projected.y.push(normalize(point[axis2Index]));
+          projected.z.push(value);
+        });
+        return projected;
+      }
+
+      function render3DPlots(results, dataset, flattenAxis) {
         if (typeof Plotly === "undefined") {
           plotsContainer.textContent = "Plotly の読み込みに失敗しました。ページを再読み込みしてください。";
           return;
@@ -220,12 +349,29 @@
         }
 
         results.forEach((item, index) => {
+          const surface = computeFlattenedSurface(item.grid_points || [], item.grid_values || [], flattenAxis);
+          const projected = projectDataset(dataset, flattenAxis);
+
           const card = document.createElement("section");
           card.className = "plot-card";
 
           const heading = document.createElement("h3");
           heading.textContent = `${item.method} (${item.smoothness_class})`;
           card.appendChild(heading);
+
+          if (!surface) {
+            const message = document.createElement("p");
+            message.style.margin = "0";
+            message.textContent = "補間サーフェスを生成できませんでした。";
+            card.appendChild(message);
+            plotsContainer.appendChild(card);
+            return;
+          }
+
+          const caption = document.createElement("p");
+          caption.style.margin = "0";
+          caption.textContent = `${surface.flattenedLabel} 軸を平均化し、${surface.axis1Label}-${surface.axis2Label} 平面上に投影した補間サーフェスです。`;
+          card.appendChild(caption);
 
           const plotDiv = document.createElement("div");
           plotDiv.className = "plot-container";
@@ -234,49 +380,43 @@
 
           plotsContainer.appendChild(card);
 
+          const surfaceTrace = {
+            type: "surface",
+            x: surface.axis1Values,
+            y: surface.axis2Values,
+            z: surface.zMatrix,
+            colorscale: "Turbo",
+            opacity: 0.85,
+            name: "補間サーフェス",
+            showscale: false,
+          };
+
           const datasetTrace = {
             type: "scatter3d",
             mode: "markers",
-            x: dataset.points.map((p) => p[0]),
-            y: dataset.points.map((p) => p[1]),
-            z: dataset.points.map((p) => p[2]),
+            x: projected.x,
+            y: projected.y,
+            z: projected.z,
             marker: {
-              size: 4,
-              color: dataset.values,
-              colorscale: "Viridis",
-              opacity: 0.7,
+              size: 5,
+              color: "#ff4081",
+              opacity: 0.9,
             },
             name: "元データ",
-          };
-
-          const gridPoints = item.grid_points || [];
-          const gridTrace = {
-            type: "scatter3d",
-            mode: "markers",
-            x: gridPoints.map((p) => p[0]),
-            y: gridPoints.map((p) => p[1]),
-            z: gridPoints.map((p) => p[2]),
-            marker: {
-              size: 3,
-              color: item.grid_values || [],
-              colorscale: "Turbo",
-              opacity: 0.6,
-            },
-            name: "補間値",
           };
 
           const layout = {
             margin: { l: 0, r: 0, t: 0, b: 0 },
             scene: {
-              xaxis: { title: "X" },
-              yaxis: { title: "Y" },
-              zaxis: { title: "Z" },
+              xaxis: { title: surface.axis1Label },
+              yaxis: { title: surface.axis2Label },
+              zaxis: { title: `Value (平均化: ${surface.flattenedLabel})` },
               bgcolor: "#f8f9fa",
             },
             legend: { orientation: "h" },
           };
 
-          Plotly.newPlot(plotDiv, [datasetTrace, gridTrace], layout, {
+          Plotly.newPlot(plotDiv, [surfaceTrace, datasetTrace], layout, {
             responsive: true,
             displaylogo: false,
             modeBarButtonsToRemove: ["toImage"],
@@ -286,18 +426,22 @@
 
       async function runComparison() {
         buttonEl.disabled = true;
+        dimensionSelect.disabled = true;
         statusEl.textContent = "Python計算を実行中 (20〜30秒ほどかかる場合があります)...";
         try {
           const pyodide = await pyodideReadyPromise;
           const resultJson = await pyodide.runPythonAsync(`import json\nfrom compare_interpolation import run_comparison\njson.dumps(run_comparison(save_artifacts=False), ensure_ascii=False)`);
           const result = JSON.parse(resultJson);
-          renderTableRows(result.results);
+          latestResults = Array.isArray(result.results) ? result.results : [];
+          latestDataset = result.dataset || null;
+          renderTableRows(latestResults);
           chartContainer.innerHTML = result.svg;
-          if (result.dataset) {
-            render3DPlots(result.results, result.dataset);
+          if (latestDataset && latestResults.length) {
+            render3DPlots(latestResults, latestDataset, dimensionSelect.value || "z");
           } else {
             plotsContainer.textContent = "3Dグラフを生成できませんでした。";
           }
+          dimensionSelect.disabled = !(latestDataset && latestResults.length);
           if (result.skipped && result.skipped.length) {
             skippedContainer.hidden = false;
             skippedContainer.innerHTML =
@@ -320,6 +464,12 @@
       }
 
       buttonEl.addEventListener("click", runComparison);
+      dimensionSelect.addEventListener("change", () => {
+        if (!latestResults.length || !latestDataset) {
+          return;
+        }
+        render3DPlots(latestResults, latestDataset, dimensionSelect.value || "z");
+      });
     </script>
   </body>
 </html>
