@@ -18,7 +18,7 @@ import os
 import random
 import statistics
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 Point3D = Tuple[float, float, float]
 
@@ -158,6 +158,72 @@ def write_csv(path: str, data: List[Tuple[Point3D, float]]) -> None:
         writer.writerow(["x", "y", "z", "value"])
         for (x, y, z), value in data:
             writer.writerow([f"{x:.6f}", f"{y:.6f}", f"{z:.6f}", f"{value:.6f}"])
+
+
+def normalize_dataset(dataset_input: Any) -> List[Tuple[Point3D, float]]:
+    """Coerce various dataset representations into ``[(Point3D, value), ...]``."""
+
+    if dataset_input is None:
+        raise ValueError("Dataset input is None.")
+
+    def _coerce_point(value: Sequence[float]) -> Point3D:
+        if len(value) != 3:
+            raise ValueError("Each point must contain exactly three coordinates.")
+        try:
+            return (float(value[0]), float(value[1]), float(value[2]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Point coordinates must be numeric.") from exc
+
+    normalized: List[Tuple[Point3D, float]] = []
+
+    if isinstance(dataset_input, dict):
+        points = dataset_input.get("points")
+        values = dataset_input.get("values")
+        if points is None or values is None:
+            raise ValueError("Dictionary dataset must include 'points' and 'values'.")
+        if len(points) != len(values):
+            raise ValueError("'points' and 'values' must have the same length.")
+        iterator = zip(points, values)
+    else:
+        iterator = dataset_input
+
+    for item in iterator:
+        if isinstance(item, dict):
+            if not {"x", "y", "z", "value"}.issubset(item.keys()):
+                raise ValueError("Dictionary rows must include x, y, z, and value keys.")
+            point = _coerce_point((item["x"], item["y"], item["z"]))
+            try:
+                value = float(item["value"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Values must be numeric.") from exc
+        elif isinstance(item, (list, tuple)):
+            if len(item) == 2 and isinstance(item[0], (list, tuple)):
+                point = _coerce_point(item[0])
+                try:
+                    value = float(item[1])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Values must be numeric.") from exc
+            elif len(item) == 4:
+                point = _coerce_point(item[:3])
+                try:
+                    value = float(item[3])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Values must be numeric.") from exc
+            else:
+                raise ValueError(
+                    "Iterable rows must be ((x, y, z), value) or (x, y, z, value)."
+                )
+        else:
+            raise ValueError(
+                "Dataset rows must be dicts or sequences describing a point and value."
+            )
+
+        normalized.append((point, value))
+
+    if not normalized:
+        raise ValueError("Dataset must contain at least one row.")
+
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -683,13 +749,20 @@ def run_comparison(
     test_ratio: float = 0.2,
     grid_size: int = 6,
     save_artifacts: bool = True,
+    dataset: Optional[Sequence[Tuple[Point3D, float]]] = None,
 ) -> Dict[str, object]:
-    dataset = generate_dataset(num_points, seed=seed)
-    csv_path = os.path.join("data", "dummy_3d_points.csv")
-    if save_artifacts:
-        write_csv(csv_path, dataset)
+    if dataset is None:
+        dataset_list = generate_dataset(num_points, seed=seed)
+        dataset_source = "synthetic"
+        csv_path = os.path.join("data", "dummy_3d_points.csv")
+        if save_artifacts:
+            write_csv(csv_path, dataset_list)
+    else:
+        dataset_list = normalize_dataset(dataset)
+        dataset_source = "custom"
+        csv_path = None
 
-    train, test = train_test_split(dataset[:], test_ratio=test_ratio)
+    train, test = train_test_split(dataset_list[:], test_ratio=test_ratio)
 
     interpolators: List[Interpolator] = [
         NearestNeighborInterpolator(),
@@ -753,8 +826,9 @@ def run_comparison(
     ]
 
     dataset_payload = {
-        "points": [list(point) for point, _ in dataset],
-        "values": [value for _, value in dataset],
+        "points": [list(point) for point, _ in dataset_list],
+        "values": [value for _, value in dataset_list],
+        "source": dataset_source,
     }
 
     return {
@@ -765,13 +839,21 @@ def run_comparison(
         "svg": svg_content,
         "dataset": dataset_payload,
         "skipped": skipped,
+        "dataset_source": dataset_source,
     }
 
 
 def main() -> None:
     summary = run_comparison()
 
-    print("Synthetic dataset written to:", summary["dataset_csv_path"])
+    if summary["dataset_source"] == "synthetic":
+        print("Synthetic dataset written to:", summary["dataset_csv_path"])
+    else:
+        print(
+            "Custom dataset supplied with",
+            len(summary["dataset"]["points"]),
+            "rows.",
+        )
     print("Evaluation summary written to:", summary["results_csv_path"])
     print("SVG chart written to:", summary["svg_path"])
     print()

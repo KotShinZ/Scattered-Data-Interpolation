@@ -65,6 +65,9 @@
         opacity: 0.6;
         cursor: not-allowed;
       }
+      input[type="file"] {
+        font-size: 0.95rem;
+      }
       #status {
         margin-top: 1rem;
         font-weight: 600;
@@ -125,6 +128,9 @@
         border: 1px solid #ffd54f;
         padding: 1rem;
       }
+      #dataset-label {
+        font-weight: 600;
+      }
       code {
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       }
@@ -150,6 +156,16 @@
           選択した軸方向の情報を平均化して 2 次元サーフェスとして描画します。
         </p>
       </div>
+      <div class="controls" id="dataset-controls">
+        <label for="csv-input">CSVをインポート:</label>
+        <input id="csv-input" type="file" accept=".csv,text/csv" />
+        <button id="reset-dataset" type="button">ダミーデータを使用</button>
+        <span id="dataset-label">現在: ダミーデータを使用</span>
+      </div>
+      <p style="margin: 0.5rem 0 0; font-size: 0.95rem;">
+        CSV には <code>x,y,z,value</code> の 4 列を含めてください（ヘッダー行は任意）。
+        ファイルを読み込むまでは付属のダミーデータで計算します。
+      </p>
     </header>
 
     <section>
@@ -186,9 +202,100 @@
       const plotsContainer = document.getElementById("plots-container");
       const skippedContainer = document.getElementById("skipped");
       const dimensionSelect = document.getElementById("flatten-dimension");
+      const fileInput = document.getElementById("csv-input");
+      const resetDatasetButton = document.getElementById("reset-dataset");
+      const datasetLabel = document.getElementById("dataset-label");
 
       let latestResults = [];
       let latestDataset = null;
+      let importedDataset = null;
+      let importedDatasetName = "";
+
+      function updateDatasetLabel() {
+        if (!datasetLabel) {
+          return;
+        }
+        if (importedDataset) {
+          datasetLabel.textContent = `現在: ${importedDatasetName || "インポートデータ"} を使用`;
+        } else {
+          datasetLabel.textContent = "現在: ダミーデータを使用";
+        }
+      }
+
+      function parseCsvDataset(text) {
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+        if (!lines.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        let startIndex = 0;
+        let columnOrder = [0, 1, 2, 3];
+        const firstCells = lines[0].split(",").map((cell) => cell.trim());
+        const lowerHeader = firstCells.map((cell) => cell.toLowerCase());
+        const hasHeader =
+          lowerHeader.includes("x") ||
+          lowerHeader.includes("y") ||
+          lowerHeader.includes("z") ||
+          lowerHeader.includes("value");
+
+        if (hasHeader) {
+          const required = ["x", "y", "z", "value"];
+          columnOrder = required.map((key) => {
+            const index = lowerHeader.indexOf(key);
+            if (index === -1) {
+              throw new Error("ヘッダーには x, y, z, value の列が必要です。");
+            }
+            return index;
+          });
+          startIndex = 1;
+        } else if (firstCells.length < 4) {
+          throw new Error("各行には少なくとも4列の数値が必要です。");
+        }
+
+        const points = [];
+        const values = [];
+        for (let rowIndex = startIndex; rowIndex < lines.length; rowIndex += 1) {
+          const row = lines[rowIndex];
+          if (!row) {
+            continue;
+          }
+          const cells = row.split(",").map((cell) => cell.trim());
+          if (cells.length < 4) {
+            throw new Error(`行 ${rowIndex + 1} に十分な列がありません。`);
+          }
+          const pick = (index) => {
+            if (index >= cells.length) {
+              throw new Error(`行 ${rowIndex + 1} の列数が足りません。`);
+            }
+            return cells[index];
+          };
+          const x = Number(pick(columnOrder[0]));
+          const y = Number(pick(columnOrder[1]));
+          const z = Number(pick(columnOrder[2]));
+          const value = Number(pick(columnOrder[3]));
+          if (
+            !Number.isFinite(x) ||
+            !Number.isFinite(y) ||
+            !Number.isFinite(z) ||
+            !Number.isFinite(value)
+          ) {
+            throw new Error(`行 ${rowIndex + 1} に数値以外の値が含まれています。`);
+          }
+          points.push([x, y, z]);
+          values.push(value);
+        }
+
+        if (!points.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        return { points, values };
+      }
+
+      updateDatasetLabel();
 
       const pyodideReadyPromise = (async () => {
         statusEl.textContent = "Pyodideを読み込み中...";
@@ -211,6 +318,48 @@
         buttonEl.disabled = true;
         throw error;
       });
+
+      if (fileInput) {
+        fileInput.addEventListener("change", async (event) => {
+          const target = event.target;
+          const file = target && target.files ? target.files[0] : null;
+          if (!file) {
+            importedDataset = null;
+            importedDatasetName = "";
+            updateDatasetLabel();
+            statusEl.textContent = "ダミーデータを使用します。";
+            return;
+          }
+
+          statusEl.textContent = `${file.name} を読み込み中...`;
+          try {
+            const text = await file.text();
+            importedDataset = parseCsvDataset(text);
+            importedDatasetName = file.name;
+            updateDatasetLabel();
+            statusEl.textContent = `${file.name} を読み込みました。結果を計算するとインポートしたデータを使用します。`;
+          } catch (error) {
+            importedDataset = null;
+            importedDatasetName = "";
+            updateDatasetLabel();
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
+            target.value = "";
+          }
+        });
+      }
+
+      if (resetDatasetButton) {
+        resetDatasetButton.addEventListener("click", () => {
+          importedDataset = null;
+          importedDatasetName = "";
+          if (fileInput) {
+            fileInput.value = "";
+          }
+          updateDatasetLabel();
+          statusEl.textContent = "ダミーデータに戻しました。結果を計算すると付属のデータを使用します。";
+        });
+      }
 
       function formatNumber(value) {
         return Number(value).toFixed(4);
@@ -428,9 +577,20 @@
         buttonEl.disabled = true;
         dimensionSelect.disabled = true;
         statusEl.textContent = "Python計算を実行中 (20〜30秒ほどかかる場合があります)...";
+        let pyodide;
         try {
-          const pyodide = await pyodideReadyPromise;
-          const resultJson = await pyodide.runPythonAsync(`import json\nfrom compare_interpolation import run_comparison\njson.dumps(run_comparison(save_artifacts=False), ensure_ascii=False)`);
+          pyodide = await pyodideReadyPromise;
+          pyodide.globals.set("JS_DATASET", importedDataset ? importedDataset : null);
+          const pythonCode = `import json
+from pyodide.ffi import to_py
+from compare_interpolation import run_comparison, normalize_dataset
+
+dataset_input = None
+if JS_DATASET is not None:
+    dataset_input = normalize_dataset(to_py(JS_DATASET))
+
+json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input), ensure_ascii=False)`;
+          const resultJson = await pyodide.runPythonAsync(pythonCode);
           const result = JSON.parse(resultJson);
           latestResults = Array.isArray(result.results) ? result.results : [];
           latestDataset = result.dataset || null;
@@ -454,11 +614,21 @@
             skippedContainer.hidden = true;
             skippedContainer.textContent = "";
           }
-          statusEl.textContent = "計算が完了しました。";
+          const datasetSource = result.dataset_source || (result.dataset && result.dataset.source);
+          if (datasetSource === "custom") {
+            const label = importedDatasetName || "インポートデータ";
+            statusEl.textContent = `${label} を使って計算が完了しました。`;
+          } else {
+            statusEl.textContent = "ダミーデータで計算が完了しました。";
+          }
         } catch (error) {
           console.error(error);
           statusEl.textContent = "計算に失敗しました: " + error;
         } finally {
+          if (pyodide) {
+            pyodide.globals.set("JS_DATASET", null);
+          }
+          dimensionSelect.disabled = !(latestDataset && latestResults.length);
           buttonEl.disabled = false;
         }
       }
