@@ -154,6 +154,25 @@
         </select>
         <label for="slice-value" id="slice-value-label">固定値 (Z):</label>
         <input id="slice-value" type="number" step="any" value="0.5" />
+        <label style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 500;">
+          <input id="surface-occlusion" type="checkbox" />
+          サーフェスで元データを隠す
+        </label>
+        <label
+          for="point-size"
+          style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 500;"
+        >
+          元データの点サイズ
+          <input
+            id="point-size"
+            type="number"
+            min="1"
+            max="30"
+            step="1"
+            value="5"
+            style="width: 4.5rem;"
+          />
+        </label>
         <p style="margin: 0; font-size: 0.95rem;">
           選択した軸を入力値で固定し、残り 2 軸上の格子で補間値を計算して 3D サーフェスとして描画します。
         </p>
@@ -210,6 +229,8 @@
       const sliceAxisSelect = document.getElementById("slice-axis");
       const sliceValueInput = document.getElementById("slice-value");
       const sliceValueLabel = document.getElementById("slice-value-label");
+      const surfaceOcclusionToggle = document.getElementById("surface-occlusion");
+      const pointSizeInput = document.getElementById("point-size");
       const fileInput = document.getElementById("csv-input");
       const resetDatasetButton = document.getElementById("reset-dataset");
       const datasetLabel = document.getElementById("dataset-label");
@@ -218,6 +239,20 @@
       let latestDataset = null;
       let importedDataset = null;
       let importedDatasetName = "";
+      const defaultPointSize = 5;
+      let latestOcclusionPreference = surfaceOcclusionToggle
+        ? Boolean(surfaceOcclusionToggle.checked)
+        : false;
+      let latestPointSize = defaultPointSize;
+
+      if (pointSizeInput) {
+        const parsed = Number.parseFloat(pointSizeInput.value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          latestPointSize = parsed;
+        } else {
+          pointSizeInput.value = String(defaultPointSize);
+        }
+      }
 
       function updateSliceValueLabel() {
         if (!sliceValueLabel || !sliceAxisSelect) {
@@ -451,6 +486,21 @@
           return;
         }
 
+        const occlusionEnabled = surfaceOcclusionToggle
+          ? Boolean(surfaceOcclusionToggle.checked)
+          : false;
+        let markerSize = latestPointSize;
+        if (!Number.isFinite(markerSize) || markerSize <= 0) {
+          markerSize = defaultPointSize;
+        }
+        if (pointSizeInput) {
+          const parsed = Number.parseFloat(pointSizeInput.value);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            markerSize = parsed;
+          }
+        }
+        latestPointSize = markerSize;
+
         const firstSlice = results[0]?.slice;
         const sliceAxis = firstSlice?.axis || "z";
         const projected = projectDataset(dataset, sliceAxis);
@@ -523,7 +573,7 @@
             y: yGrid,
             z: zMatrix,
             colorscale: "Turbo",
-            opacity: 0.85,
+            opacity: occlusionEnabled ? 1 : 0.85,
             name: "補間サーフェス",
             showscale: false,
           };
@@ -535,11 +585,12 @@
             y: projected.y,
             z: projected.z,
             marker: {
-              size: 5,
+              size: markerSize,
               color: "#ff4081",
-              opacity: 0.9,
+              opacity: occlusionEnabled ? 1 : 0.9,
             },
             name: "元データ",
+            hovertemplate: "(%{x}, %{y}, %{z})<extra>元データ</extra>",
           };
 
           const layout = {
@@ -559,7 +610,11 @@
             legend: { orientation: "h" },
           };
 
-          Plotly.newPlot(plotDiv, [surfaceTrace, datasetTrace], layout, {
+          const traces = occlusionEnabled
+            ? [surfaceTrace, datasetTrace]
+            : [datasetTrace, surfaceTrace];
+
+          Plotly.newPlot(plotDiv, traces, layout, {
             responsive: true,
             displaylogo: false,
             modeBarButtonsToRemove: ["toImage"],
@@ -601,6 +656,9 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axi
           const result = JSON.parse(resultJson);
           latestResults = Array.isArray(result.results) ? result.results : [];
           latestDataset = result.dataset || null;
+          latestOcclusionPreference = surfaceOcclusionToggle
+            ? Boolean(surfaceOcclusionToggle.checked)
+            : false;
           renderTableRows(latestResults);
           chartContainer.innerHTML = result.svg;
           if (latestDataset && latestResults.length) {
@@ -662,6 +720,36 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axi
       buttonEl.addEventListener("click", runComparison);
       if (sliceAxisSelect) {
         sliceAxisSelect.addEventListener("change", updateSliceValueLabel);
+      }
+      if (surfaceOcclusionToggle) {
+        surfaceOcclusionToggle.addEventListener("change", () => {
+          if (!latestResults.length || !latestDataset) {
+            return;
+          }
+          if (surfaceOcclusionToggle.checked !== latestOcclusionPreference) {
+            latestOcclusionPreference = surfaceOcclusionToggle.checked;
+            render3DPlots(latestResults, latestDataset);
+          }
+        });
+      }
+      if (pointSizeInput) {
+        const handlePointSizeChange = () => {
+          if (!pointSizeInput) {
+            return;
+          }
+          let parsed = Number.parseFloat(pointSizeInput.value);
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            parsed = defaultPointSize;
+            pointSizeInput.value = String(defaultPointSize);
+          }
+          latestPointSize = parsed;
+          if (!latestResults.length || !latestDataset) {
+            return;
+          }
+          render3DPlots(latestResults, latestDataset);
+        };
+        pointSizeInput.addEventListener("input", handlePointSizeChange);
+        pointSizeInput.addEventListener("change", handlePointSizeChange);
       }
     </script>
   </body>
