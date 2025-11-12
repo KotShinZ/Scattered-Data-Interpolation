@@ -146,16 +146,22 @@
       <button id="run-button">結果を計算</button>
       <div id="status">Pyodideを初期化中...</div>
       <div class="controls">
-        <label for="flatten-dimension">押しつぶす軸:</label>
-        <select id="flatten-dimension" disabled>
+        <label for="slice-axis">固定する軸:</label>
+        <select id="slice-axis">
           <option value="x">X 軸</option>
           <option value="y">Y 軸</option>
           <option value="z" selected>Z 軸</option>
         </select>
+        <label for="slice-value" id="slice-value-label">固定値 (Z):</label>
+        <input id="slice-value" type="number" step="any" value="0.5" />
         <p style="margin: 0; font-size: 0.95rem;">
-          選択した軸方向の情報を平均化して 2 次元サーフェスとして描画します。
+          選択した軸を入力値で固定し、残り 2 軸上の格子で補間値を計算して 3D サーフェスとして描画します。
         </p>
       </div>
+      <p style="margin: 0.5rem 0 0; font-size: 0.95rem;">
+        Python 側では常に 3 次元の補間器を学習し、指定した軸を固定した平面で再度補間（predict）した値をブラウザに渡します。
+        元の散布データの座標や値は変更されず、そのまま重ね合わせて可視化しています。
+      </p>
       <div class="controls" id="dataset-controls">
         <label for="csv-input">CSVをインポート:</label>
         <input id="csv-input" type="file" accept=".csv,text/csv" />
@@ -201,7 +207,9 @@
       const chartContainer = document.getElementById("chart-container");
       const plotsContainer = document.getElementById("plots-container");
       const skippedContainer = document.getElementById("skipped");
-      const dimensionSelect = document.getElementById("flatten-dimension");
+      const sliceAxisSelect = document.getElementById("slice-axis");
+      const sliceValueInput = document.getElementById("slice-value");
+      const sliceValueLabel = document.getElementById("slice-value-label");
       const fileInput = document.getElementById("csv-input");
       const resetDatasetButton = document.getElementById("reset-dataset");
       const datasetLabel = document.getElementById("dataset-label");
@@ -210,6 +218,14 @@
       let latestDataset = null;
       let importedDataset = null;
       let importedDatasetName = "";
+
+      function updateSliceValueLabel() {
+        if (!sliceValueLabel || !sliceAxisSelect) {
+          return;
+        }
+        const axis = (sliceAxisSelect.value || "z").toUpperCase();
+        sliceValueLabel.textContent = `固定値 (${axis}):`;
+      }
 
       function updateDatasetLabel() {
         if (!datasetLabel) {
@@ -296,6 +312,7 @@
       }
 
       updateDatasetLabel();
+      updateSliceValueLabel();
 
       const pyodideReadyPromise = (async () => {
         statusEl.textContent = "Pyodideを読み込み中...";
@@ -394,72 +411,9 @@
         }
       }
 
-      const axisNameList = ["X", "Y", "Z"];
-
-      function computeFlattenedSurface(gridPoints, gridValues, flattenAxis) {
+      function projectDataset(dataset, sliceAxis) {
         const axisIndex = { x: 0, y: 1, z: 2 };
-        const dropIndex = axisIndex[flattenAxis] ?? 2;
-        const keepIndices = [0, 1, 2].filter((idx) => idx !== dropIndex);
-        const axis1Index = keepIndices[0];
-        const axis2Index = keepIndices[1];
-        const normalize = (value) => Number.parseFloat(Number(value).toFixed(6));
-
-        const axis1Set = new Set();
-        const axis2Set = new Set();
-        const aggregator = new Map();
-
-        gridPoints.forEach((coords, idx) => {
-          if (!Array.isArray(coords) || coords.length < 3) {
-            return;
-          }
-          const value = Number(gridValues[idx]);
-          if (!Number.isFinite(value)) {
-            return;
-          }
-          const axis1Val = normalize(coords[axis1Index]);
-          const axis2Val = normalize(coords[axis2Index]);
-          const key = `${axis1Val}|${axis2Val}`;
-          axis1Set.add(axis1Val);
-          axis2Set.add(axis2Val);
-          if (!aggregator.has(key)) {
-            aggregator.set(key, { sum: 0, count: 0, axis1: axis1Val, axis2: axis2Val });
-          }
-          const entry = aggregator.get(key);
-          entry.sum += value;
-          entry.count += 1;
-        });
-
-        const axis1Values = Array.from(axis1Set).sort((a, b) => a - b);
-        const axis2Values = Array.from(axis2Set).sort((a, b) => a - b);
-        if (!axis1Values.length || !axis2Values.length) {
-          return null;
-        }
-        const axis1IndexMap = new Map(axis1Values.map((value, i) => [value, i]));
-        const axis2IndexMap = new Map(axis2Values.map((value, i) => [value, i]));
-
-        const zMatrix = axis2Values.map(() => axis1Values.map(() => null));
-        aggregator.forEach((entry) => {
-          const col = axis1IndexMap.get(entry.axis1);
-          const row = axis2IndexMap.get(entry.axis2);
-          if (col === undefined || row === undefined || entry.count === 0) {
-            return;
-          }
-          zMatrix[row][col] = entry.sum / entry.count;
-        });
-
-        return {
-          axis1Label: axisNameList[axis1Index],
-          axis2Label: axisNameList[axis2Index],
-          flattenedLabel: axisNameList[dropIndex],
-          axis1Values,
-          axis2Values,
-          zMatrix,
-        };
-      }
-
-      function projectDataset(dataset, flattenAxis) {
-        const axisIndex = { x: 0, y: 1, z: 2 };
-        const dropIndex = axisIndex[flattenAxis] ?? 2;
+        const dropIndex = axisIndex[sliceAxis] ?? 2;
         const keepIndices = [0, 1, 2].filter((idx) => idx !== dropIndex);
         const axis1Index = keepIndices[0];
         const axis2Index = keepIndices[1];
@@ -485,7 +439,7 @@
         return projected;
       }
 
-      function render3DPlots(results, dataset, flattenAxis) {
+      function render3DPlots(results, dataset) {
         if (typeof Plotly === "undefined") {
           plotsContainer.textContent = "Plotly の読み込みに失敗しました。ページを再読み込みしてください。";
           return;
@@ -497,9 +451,12 @@
           return;
         }
 
+        const firstSlice = results[0]?.slice;
+        const sliceAxis = firstSlice?.axis || "z";
+        const projected = projectDataset(dataset, sliceAxis);
+
         results.forEach((item, index) => {
-          const surface = computeFlattenedSurface(item.grid_points || [], item.grid_values || [], flattenAxis);
-          const projected = projectDataset(dataset, flattenAxis);
+          const slice = item.slice;
 
           const card = document.createElement("section");
           card.className = "plot-card";
@@ -508,10 +465,13 @@
           heading.textContent = `${item.method} (${item.smoothness_class})`;
           card.appendChild(heading);
 
-          if (!surface) {
+          if (!slice ||
+              !Array.isArray(slice.axis1_values) ||
+              !Array.isArray(slice.axis2_values) ||
+              !Array.isArray(slice.matrix)) {
             const message = document.createElement("p");
             message.style.margin = "0";
-            message.textContent = "補間サーフェスを生成できませんでした。";
+            message.textContent = "固定平面での補間サーフェスを生成できませんでした。";
             card.appendChild(message);
             plotsContainer.appendChild(card);
             return;
@@ -519,7 +479,7 @@
 
           const caption = document.createElement("p");
           caption.style.margin = "0";
-          caption.textContent = `${surface.flattenedLabel} 軸を平均化し、${surface.axis1Label}-${surface.axis2Label} 平面上に投影した補間サーフェスです。`;
+          caption.textContent = `${(slice.axis_label || sliceAxis).toUpperCase()} = ${formatNumber(slice.value)} における ${slice.axis1_label}-${slice.axis2_label} 平面の補間結果です。`;
           card.appendChild(caption);
 
           const plotDiv = document.createElement("div");
@@ -531,9 +491,9 @@
 
           const surfaceTrace = {
             type: "surface",
-            x: surface.axis1Values,
-            y: surface.axis2Values,
-            z: surface.zMatrix,
+            x: slice.axis1_values,
+            y: slice.axis2_values,
+            z: slice.matrix,
             colorscale: "Turbo",
             opacity: 0.85,
             name: "補間サーフェス",
@@ -557,9 +517,9 @@
           const layout = {
             margin: { l: 0, r: 0, t: 0, b: 0 },
             scene: {
-              xaxis: { title: surface.axis1Label },
-              yaxis: { title: surface.axis2Label },
-              zaxis: { title: `Value (平均化: ${surface.flattenedLabel})` },
+              xaxis: { title: slice.axis1_label },
+              yaxis: { title: slice.axis2_label },
+              zaxis: { title: "Value" },
               bgcolor: "#f8f9fa",
             },
             legend: { orientation: "h" },
@@ -572,18 +532,29 @@
           });
         });
       }
-
       async function runComparison() {
         buttonEl.disabled = true;
-        dimensionSelect.disabled = true;
+        if (sliceAxisSelect) {
+          sliceAxisSelect.disabled = true;
+        }
+        if (sliceValueInput) {
+          sliceValueInput.disabled = true;
+        }
         statusEl.textContent = "Python計算を実行中 (20〜30秒ほどかかる場合があります)...";
         let pyodide;
         try {
           pyodide = await pyodideReadyPromise;
+          const chosenAxis = sliceAxisSelect ? sliceAxisSelect.value || "z" : "z";
+          const rawValue = sliceValueInput ? Number.parseFloat(sliceValueInput.value) : NaN;
+          const sliceValue = Number.isFinite(rawValue) ? rawValue : null;
           pyodide.globals.set("PY_DATASET", importedDataset ? importedDataset : null);
+          pyodide.globals.set("PY_SLICE_AXIS", chosenAxis);
+          pyodide.globals.set("PY_SLICE_VALUE", sliceValue);
           const pythonCode = `import json
 from compare_interpolation import run_comparison, normalize_dataset
 
+slice_axis = globals().get("PY_SLICE_AXIS") or "z"
+slice_value = globals().get("PY_SLICE_VALUE")
 dataset_input = None
 dataset_candidate = globals().get("PY_DATASET")
 if dataset_candidate is not None:
@@ -591,7 +562,7 @@ if dataset_candidate is not None:
         dataset_candidate = dataset_candidate.to_py()
     dataset_input = normalize_dataset(dataset_candidate)
 
-json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input), ensure_ascii=False)`;
+json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input, slice_axis=slice_axis, slice_value=slice_value), ensure_ascii=False)`;
           const resultJson = await pyodide.runPythonAsync(pythonCode);
           const result = JSON.parse(resultJson);
           latestResults = Array.isArray(result.results) ? result.results : [];
@@ -599,11 +570,23 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input), ensure_a
           renderTableRows(latestResults);
           chartContainer.innerHTML = result.svg;
           if (latestDataset && latestResults.length) {
-            render3DPlots(latestResults, latestDataset, dimensionSelect.value || "z");
+            render3DPlots(latestResults, latestDataset);
           } else {
             plotsContainer.textContent = "3Dグラフを生成できませんでした。";
           }
-          dimensionSelect.disabled = !(latestDataset && latestResults.length);
+          if (sliceAxisSelect) {
+            const axisFromResult = result.slice_axis || chosenAxis;
+            sliceAxisSelect.value = axisFromResult;
+            sliceAxisSelect.disabled = false;
+          }
+          if (sliceValueInput) {
+            const valueFromResult = Number(result.slice_value);
+            if (Number.isFinite(valueFromResult)) {
+              sliceValueInput.value = String(valueFromResult);
+            }
+            sliceValueInput.disabled = false;
+          }
+          updateSliceValueLabel();
           if (result.skipped && result.skipped.length) {
             skippedContainer.hidden = false;
             skippedContainer.innerHTML =
@@ -629,19 +612,23 @@ json.dumps(run_comparison(save_artifacts=False, dataset=dataset_input), ensure_a
         } finally {
           if (pyodide) {
             pyodide.globals.set("PY_DATASET", null);
+            pyodide.globals.set("PY_SLICE_AXIS", null);
+            pyodide.globals.set("PY_SLICE_VALUE", null);
           }
-          dimensionSelect.disabled = !(latestDataset && latestResults.length);
+          if (sliceAxisSelect) {
+            sliceAxisSelect.disabled = false;
+          }
+          if (sliceValueInput) {
+            sliceValueInput.disabled = false;
+          }
           buttonEl.disabled = false;
         }
       }
 
       buttonEl.addEventListener("click", runComparison);
-      dimensionSelect.addEventListener("change", () => {
-        if (!latestResults.length || !latestDataset) {
-          return;
-        }
-        render3DPlots(latestResults, latestDataset, dimensionSelect.value || "z");
-      });
+      if (sliceAxisSelect) {
+        sliceAxisSelect.addEventListener("change", updateSliceValueLabel);
+      }
     </script>
   </body>
 </html>

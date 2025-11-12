@@ -22,6 +22,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 Point3D = Tuple[float, float, float]
 
+AXIS_LABELS = ["X", "Y", "Z"]
+
 
 # ---------------------------------------------------------------------------
 # Linear algebra helpers (pure Python implementations)
@@ -158,6 +160,21 @@ def write_csv(path: str, data: List[Tuple[Point3D, float]]) -> None:
         writer.writerow(["x", "y", "z", "value"])
         for (x, y, z), value in data:
             writer.writerow([f"{x:.6f}", f"{y:.6f}", f"{z:.6f}", f"{value:.6f}"])
+
+
+def compute_axis_bounds(points: Sequence[Point3D]) -> List[Tuple[float, float]]:
+    if not points:
+        return [(0.0, 1.0)] * 3
+
+    xs, ys, zs = zip(*points)
+    bounds = []
+    for axis_values in (xs, ys, zs):
+        minimum = min(axis_values)
+        maximum = max(axis_values)
+        if math.isclose(minimum, maximum):
+            maximum = minimum + 1.0
+        bounds.append((minimum, maximum))
+    return bounds
 
 
 def normalize_dataset(dataset_input: Any) -> List[Tuple[Point3D, float]]:
@@ -619,6 +636,14 @@ class EvaluationResult:
     laplacian_smoothness: float
     grid_points: List[Point3D]
     grid_values: List[float]
+    slice_axis: str
+    slice_value: float
+    slice_axis1_label: str
+    slice_axis2_label: str
+    slice_fixed_label: str
+    slice_axis1_values: List[float]
+    slice_axis2_values: List[float]
+    slice_matrix: List[List[float]]
 
 
 def evaluate_interpolator(
@@ -626,6 +651,9 @@ def evaluate_interpolator(
     train: List[Tuple[Point3D, float]],
     test: List[Tuple[Point3D, float]],
     grid_size: int = 6,
+    *,
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
 ) -> EvaluationResult:
     train_points = [p for p, _ in train]
     train_values = [v for _, v in train]
@@ -655,6 +683,26 @@ def evaluate_interpolator(
     laplacians = finite_difference_laplacian(grid_values, grid_size, step)
     laplacian_smoothness = smoothness_metric_from_scalars(laplacians)
 
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    slice_axis_normalized = slice_axis.lower()
+    drop_index = axis_lookup.get(slice_axis_normalized, 2)
+    keep_indices = [index for index in range(3) if index != drop_index]
+    axis1_index, axis2_index = keep_indices
+    axis1_values = xs[:]
+    axis2_values = xs[:]
+    fixed_value = slice_value if slice_value is not None else xs[len(xs) // 2]
+
+    slice_matrix: List[List[float]] = []
+    for axis2 in axis2_values:
+        row: List[float] = []
+        for axis1 in axis1_values:
+            coords = [0.0, 0.0, 0.0]
+            coords[axis1_index] = axis1
+            coords[axis2_index] = axis2
+            coords[drop_index] = fixed_value
+            row.append(interpolator.predict((coords[0], coords[1], coords[2])))
+        slice_matrix.append(row)
+
     return EvaluationResult(
         method=getattr(interpolator, "name", interpolator.__class__.__name__),
         smoothness_class=getattr(interpolator, "smoothness_class", ""),
@@ -663,6 +711,14 @@ def evaluate_interpolator(
         laplacian_smoothness=laplacian_smoothness,
         grid_points=grid_points_list,
         grid_values=grid_value_list,
+        slice_axis=AXIS_LABELS[drop_index],
+        slice_value=fixed_value,
+        slice_axis1_label=AXIS_LABELS[axis1_index],
+        slice_axis2_label=AXIS_LABELS[axis2_index],
+        slice_fixed_label=AXIS_LABELS[drop_index],
+        slice_axis1_values=axis1_values,
+        slice_axis2_values=axis2_values,
+        slice_matrix=slice_matrix,
     )
 
 
@@ -750,6 +806,8 @@ def run_comparison(
     grid_size: int = 6,
     save_artifacts: bool = True,
     dataset: Optional[Sequence[Tuple[Point3D, float]]] = None,
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
 ) -> Dict[str, object]:
     if dataset is None:
         dataset_list = generate_dataset(num_points, seed=seed)
@@ -761,6 +819,18 @@ def run_comparison(
         dataset_list = normalize_dataset(dataset)
         dataset_source = "custom"
         csv_path = None
+
+    points_only = [point for point, _ in dataset_list]
+    axis_bounds = compute_axis_bounds(points_only)
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    normalized_axis = (slice_axis or "z").lower()
+    drop_index = axis_lookup.get(normalized_axis, 2)
+    bounds_min, bounds_max = axis_bounds[drop_index]
+    default_slice_value = (bounds_min + bounds_max) / 2.0
+    if slice_value is None or not isinstance(slice_value, (int, float)) or not math.isfinite(slice_value):
+        resolved_slice_value = default_slice_value
+    else:
+        resolved_slice_value = float(slice_value)
 
     train, test = train_test_split(dataset_list[:], test_ratio=test_ratio)
 
@@ -785,7 +855,14 @@ def run_comparison(
     skipped: List[Tuple[str, str]] = []
     for interpolator in interpolators:
         try:
-            result = evaluate_interpolator(interpolator, train[:], test[:], grid_size=grid_size)
+            result = evaluate_interpolator(
+                interpolator,
+                train[:],
+                test[:],
+                grid_size=grid_size,
+                slice_axis=normalized_axis,
+                slice_value=resolved_slice_value,
+            )
             results.append(result)
         except ValueError as exc:
             skipped.append((interpolator.name, str(exc)))
@@ -821,6 +898,16 @@ def run_comparison(
             "laplacian_smoothness": item.laplacian_smoothness,
             "grid_points": [list(point) for point in item.grid_points],
             "grid_values": item.grid_values,
+            "slice": {
+                "axis": normalized_axis,
+                "axis_label": item.slice_fixed_label,
+                "value": item.slice_value,
+                "axis1_label": item.slice_axis1_label,
+                "axis2_label": item.slice_axis2_label,
+                "axis1_values": item.slice_axis1_values,
+                "axis2_values": item.slice_axis2_values,
+                "matrix": item.slice_matrix,
+            },
         }
         for item in results
     ]
@@ -829,6 +916,7 @@ def run_comparison(
         "points": [list(point) for point, _ in dataset_list],
         "values": [value for _, value in dataset_list],
         "source": dataset_source,
+        "axis_bounds": axis_bounds,
     }
 
     return {
@@ -840,6 +928,8 @@ def run_comparison(
         "dataset": dataset_payload,
         "skipped": skipped,
         "dataset_source": dataset_source,
+        "slice_axis": normalized_axis,
+        "slice_value": resolved_slice_value,
     }
 
 
