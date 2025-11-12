@@ -454,6 +454,10 @@
         const firstSlice = results[0]?.slice;
         const sliceAxis = firstSlice?.axis || "z";
         const projected = projectDataset(dataset, sliceAxis);
+        const axisBounds = Array.isArray(dataset?.axis_bounds)
+          ? dataset.axis_bounds
+          : null;
+        const axisIndexLookup = { X: 0, Y: 1, Z: 2 };
 
         results.forEach((item, index) => {
           const slice = item.slice;
@@ -465,10 +469,12 @@
           heading.textContent = `${item.method} (${item.smoothness_class})`;
           card.appendChild(heading);
 
-          if (!slice ||
-              !Array.isArray(slice.axis1_values) ||
-              !Array.isArray(slice.axis2_values) ||
-              !Array.isArray(slice.matrix)) {
+          if (
+            !slice ||
+            !Array.isArray(slice.axis1_values) ||
+            !Array.isArray(slice.axis2_values) ||
+            !Array.isArray(slice.matrix)
+          ) {
             const message = document.createElement("p");
             message.style.margin = "0";
             message.textContent = "固定平面での補間サーフェスを生成できませんでした。";
@@ -479,7 +485,9 @@
 
           const caption = document.createElement("p");
           caption.style.margin = "0";
-          caption.textContent = `${(slice.axis_label || sliceAxis).toUpperCase()} = ${formatNumber(slice.value)} における ${slice.axis1_label}-${slice.axis2_label} 平面の補間結果です。`;
+          caption.textContent = `${(slice.axis_label || sliceAxis).toUpperCase()} = ${formatNumber(
+            slice.value
+          )} における ${slice.axis1_label}-${slice.axis2_label} 平面の補間結果です。`;
           card.appendChild(caption);
 
           const plotDiv = document.createElement("div");
@@ -489,11 +497,31 @@
 
           plotsContainer.appendChild(card);
 
+          const axis1Values = slice.axis1_values.map((value) => Number(value));
+          const axis2Values = slice.axis2_values.map((value) => Number(value));
+          const zMatrix = slice.matrix.map((row) => row.map((value) => Number(value)));
+
+          const xGrid = axis2Values.map(() => axis1Values.slice());
+          const yGrid = axis2Values.map((axis2) =>
+            Array(axis1Values.length).fill(axis2)
+          );
+
+          const axis1RangeIndex = axisIndexLookup[slice.axis1_label?.toUpperCase?.() || ""];
+          const axis2RangeIndex = axisIndexLookup[slice.axis2_label?.toUpperCase?.() || ""];
+          const axis1Range =
+            axisBounds && Number.isInteger(axis1RangeIndex)
+              ? axisBounds[axis1RangeIndex]
+              : null;
+          const axis2Range =
+            axisBounds && Number.isInteger(axis2RangeIndex)
+              ? axisBounds[axis2RangeIndex]
+              : null;
+
           const surfaceTrace = {
             type: "surface",
-            x: slice.axis1_values,
-            y: slice.axis2_values,
-            z: slice.matrix,
+            x: xGrid,
+            y: yGrid,
+            z: zMatrix,
             colorscale: "Turbo",
             opacity: 0.85,
             name: "補間サーフェス",
@@ -517,8 +545,14 @@
           const layout = {
             margin: { l: 0, r: 0, t: 0, b: 0 },
             scene: {
-              xaxis: { title: slice.axis1_label },
-              yaxis: { title: slice.axis2_label },
+              xaxis: {
+                title: slice.axis1_label,
+                range: axis1Range ? [axis1Range[0], axis1Range[1]] : undefined,
+              },
+              yaxis: {
+                title: slice.axis2_label,
+                range: axis2Range ? [axis2Range[0], axis2Range[1]] : undefined,
+              },
               zaxis: { title: "Value" },
               bgcolor: "#f8f9fa",
             },

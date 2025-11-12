@@ -550,34 +550,42 @@ def create_grid(num: int, lower: float = 0.0, upper: float = 1.0) -> Tuple[List[
     return coords, step
 
 
-def finite_difference_gradients(grid_values: Dict[Tuple[int, int, int], float], num: int, step: float) -> Dict[Tuple[int, int, int], Tuple[float, float, float]]:
+def finite_difference_gradients(
+    grid_values: Dict[Tuple[int, int, int], float],
+    num: int,
+    steps: Tuple[float, float, float],
+) -> Dict[Tuple[int, int, int], Tuple[float, float, float]]:
+    step_x, step_y, step_z = steps
     gradients: Dict[Tuple[int, int, int], Tuple[float, float, float]] = {}
     for i in range(1, num - 1):
         for j in range(1, num - 1):
             for k in range(1, num - 1):
-                fx = (grid_values[(i + 1, j, k)] - grid_values[(i - 1, j, k)]) / (2 * step)
-                fy = (grid_values[(i, j + 1, k)] - grid_values[(i, j - 1, k)]) / (2 * step)
-                fz = (grid_values[(i, j, k + 1)] - grid_values[(i, j, k - 1)]) / (2 * step)
+                fx = (grid_values[(i + 1, j, k)] - grid_values[(i - 1, j, k)]) / (2 * step_x)
+                fy = (grid_values[(i, j + 1, k)] - grid_values[(i, j - 1, k)]) / (2 * step_y)
+                fz = (grid_values[(i, j, k + 1)] - grid_values[(i, j, k - 1)]) / (2 * step_z)
                 gradients[(i, j, k)] = (fx, fy, fz)
     return gradients
 
 
-def finite_difference_laplacian(grid_values: Dict[Tuple[int, int, int], float], num: int, step: float) -> Dict[Tuple[int, int, int], float]:
+def finite_difference_laplacian(
+    grid_values: Dict[Tuple[int, int, int], float],
+    num: int,
+    steps: Tuple[float, float, float],
+) -> Dict[Tuple[int, int, int], float]:
+    step_x, step_y, step_z = steps
     laplacians: Dict[Tuple[int, int, int], float] = {}
-    step2 = step * step
+    step_x2 = step_x * step_x
+    step_y2 = step_y * step_y
+    step_z2 = step_z * step_z
     for i in range(1, num - 1):
         for j in range(1, num - 1):
             for k in range(1, num - 1):
                 center = grid_values[(i, j, k)]
                 laplacian = (
-                    grid_values[(i + 1, j, k)]
-                    + grid_values[(i - 1, j, k)]
-                    + grid_values[(i, j + 1, k)]
-                    + grid_values[(i, j - 1, k)]
-                    + grid_values[(i, j, k + 1)]
-                    + grid_values[(i, j, k - 1)]
-                    - 6 * center
-                ) / step2
+                    (grid_values[(i + 1, j, k)] - 2 * center + grid_values[(i - 1, j, k)]) / step_x2
+                    + (grid_values[(i, j + 1, k)] - 2 * center + grid_values[(i, j - 1, k)]) / step_y2
+                    + (grid_values[(i, j, k + 1)] - 2 * center + grid_values[(i, j, k - 1)]) / step_z2
+                )
                 laplacians[(i, j, k)] = laplacian
     return laplacians
 
@@ -652,9 +660,13 @@ def evaluate_interpolator(
     test: List[Tuple[Point3D, float]],
     grid_size: int = 6,
     *,
+    axis_bounds: Sequence[Tuple[float, float]],
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
 ) -> EvaluationResult:
+    if len(axis_bounds) != 3:
+        raise ValueError("axis_bounds must contain bounds for X, Y, and Z.")
+
     train_points = [p for p, _ in train]
     train_values = [v for _, v in train]
     interpolator.fit(train_points, train_values)
@@ -664,23 +676,35 @@ def evaluate_interpolator(
     predictions = [interpolator.predict(p) for p in test_points]
     error = rmse(predictions, test_values)
 
-    xs, step = create_grid(grid_size)
+    grid_axes: List[List[float]] = []
+    axis_steps: List[float] = []
+    for lower, upper in axis_bounds:
+        values, step = create_grid(grid_size, lower, upper)
+        grid_axes.append(values)
+        axis_steps.append(step if step > 0 else 1.0)
+
+    xs, ys, zs = grid_axes
+    step_x, step_y, step_z = axis_steps
     grid_values: Dict[Tuple[int, int, int], float] = {}
     grid_points_list: List[Point3D] = []
     grid_value_list: List[float] = []
     for i, x in enumerate(xs):
-        for j, y in enumerate(xs):
-            for k, z in enumerate(xs):
+        for j, y in enumerate(ys):
+            for k, z in enumerate(zs):
                 point = (x, y, z)
                 value = interpolator.predict(point)
                 grid_values[(i, j, k)] = value
                 grid_points_list.append(point)
                 grid_value_list.append(value)
 
-    gradients = finite_difference_gradients(grid_values, grid_size, step)
+    gradients = finite_difference_gradients(
+        grid_values, grid_size, (step_x, step_y, step_z)
+    )
     gradient_smoothness = smoothness_metric_from_vectors(gradients)
 
-    laplacians = finite_difference_laplacian(grid_values, grid_size, step)
+    laplacians = finite_difference_laplacian(
+        grid_values, grid_size, (step_x, step_y, step_z)
+    )
     laplacian_smoothness = smoothness_metric_from_scalars(laplacians)
 
     axis_lookup = {"x": 0, "y": 1, "z": 2}
@@ -688,9 +712,10 @@ def evaluate_interpolator(
     drop_index = axis_lookup.get(slice_axis_normalized, 2)
     keep_indices = [index for index in range(3) if index != drop_index]
     axis1_index, axis2_index = keep_indices
-    axis1_values = xs[:]
-    axis2_values = xs[:]
-    fixed_value = slice_value if slice_value is not None else xs[len(xs) // 2]
+    axis1_values = grid_axes[axis1_index][:]
+    axis2_values = grid_axes[axis2_index][:]
+    default_fixed = grid_axes[drop_index][len(grid_axes[drop_index]) // 2]
+    fixed_value = slice_value if slice_value is not None else default_fixed
 
     slice_matrix: List[List[float]] = []
     for axis2 in axis2_values:
@@ -860,6 +885,7 @@ def run_comparison(
                 train[:],
                 test[:],
                 grid_size=grid_size,
+                axis_bounds=axis_bounds,
                 slice_axis=normalized_axis,
                 slice_value=resolved_slice_value,
             )
