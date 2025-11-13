@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2軸固定ライン予測ビュー</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js" defer></script>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+        background: #f5f5f5;
+        color: #222;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1rem 3rem;
+        max-width: 960px;
+        margin-inline: auto;
+        line-height: 1.6;
+        background: inherit;
+        color: inherit;
+      }
+      header {
+        margin-bottom: 2rem;
+      }
+      h1 {
+        font-size: 1.8rem;
+        margin-bottom: 0.6rem;
+      }
+      button {
+        background: #2962ff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button[disabled] {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-top: 1rem;
+      }
+      .fixed-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 0.75rem;
+      }
+      .fixed-control {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        padding: 0.75rem;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        min-width: 180px;
+      }
+      .fixed-control.disabled {
+        opacity: 0.6;
+      }
+      input[type="number"] {
+        padding: 0.4rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid #888;
+        font-size: 1rem;
+      }
+      select {
+        min-width: 120px;
+        padding: 0.4rem 0.6rem;
+        border-radius: 4px;
+        border: 1px solid #888;
+        background: white;
+        color: inherit;
+        font-size: 1rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 1.5rem;
+        background: white;
+        color: inherit;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 0.5rem;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      thead {
+        background: #eeeeee;
+      }
+      #plots-container {
+        margin-top: 2rem;
+        display: grid;
+        gap: 1.5rem;
+      }
+      @media (min-width: 900px) {
+        #plots-container {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .plot-card {
+        background: white;
+        border: 1px solid #ccc;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .plot-card h3 {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+      .plot-container {
+        width: 100%;
+        height: 320px;
+      }
+      #dataset-label {
+        font-weight: 600;
+      }
+      #status {
+        margin-top: 0.75rem;
+        font-weight: 600;
+      }
+      .skipped {
+        margin-top: 1.5rem;
+        background: #fff8e1;
+        border: 1px solid #ffd54f;
+        padding: 1rem;
+      }
+      nav {
+        margin-bottom: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href="index.html">↩ 平面サーフェスビューに戻る</a>
+      </nav>
+      <h1>2軸固定の折れ線ビュー</h1>
+      <p>
+        このページでは Pyodide 上で学習した補間器を使い、選択した軸のみを変化させて
+        2 つの軸を固定した状態での予測結果を折れ線グラフとして比較します。
+      </p>
+      <button id="run-button">ラインを計算</button>
+      <div id="status">Pyodideを初期化中...</div>
+      <div class="controls">
+        <label for="line-axis">変化させる軸:</label>
+        <select id="line-axis">
+          <option value="x">X 軸</option>
+          <option value="y">Y 軸</option>
+          <option value="z" selected>Z 軸</option>
+        </select>
+      </div>
+      <div class="fixed-controls">
+        <label class="fixed-control" data-axis="x">
+          <span>X 軸の固定値</span>
+          <input id="fixed-x" type="number" step="any" value="0.5" />
+        </label>
+        <label class="fixed-control" data-axis="y">
+          <span>Y 軸の固定値</span>
+          <input id="fixed-y" type="number" step="any" value="0.5" />
+        </label>
+        <label class="fixed-control" data-axis="z">
+          <span>Z 軸の固定値</span>
+          <input id="fixed-z" type="number" step="any" value="0.5" />
+        </label>
+      </div>
+      <p style="margin-top: 0.5rem; font-size: 0.95rem;">
+        変化させたい軸以外の 2 軸に固定値を入力し、「ラインを計算」を押すと
+        固定値の平面上で 1 次元の補間結果を取得します。
+      </p>
+      <div class="controls" id="dataset-controls">
+        <label for="csv-input">CSVをインポート:</label>
+        <input id="csv-input" type="file" accept=".csv,text/csv" />
+        <button id="reset-dataset" type="button">ダミーデータを使用</button>
+        <button id="use-saved-dataset" type="button" hidden>保存済みデータを読み込む</button>
+        <span id="dataset-label">現在: データ未読み込み</span>
+      </div>
+      <p style="margin: 0.5rem 0 0; font-size: 0.95rem;">
+        CSV には <code>x,y,z,value</code> の 4 列を含めてください（ヘッダー行は任意）。
+        データを読み込むまでは学習・予測は実行されません。
+      </p>
+    </header>
+
+    <section>
+      <h2>評価指標</h2>
+      <p>
+        各手法の RMSE と滑らかさ指標は学習時に計算され、下表に表示されます。
+        折れ線グラフでは同じ学習済みモデルを用いて固定ライン上の予測値だけを計算しています。
+      </p>
+      <table id="results-table" aria-live="polite">
+        <thead>
+          <tr>
+            <th>手法</th>
+            <th>滑らかさクラス</th>
+            <th>RMSE</th>
+            <th>勾配滑らかさ</th>
+            <th>ラプラシアン滑らかさ</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="5">結果はまだ計算されていません。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div id="plots-container" aria-live="polite">ラインプロットは結果計算後に表示されます。</div>
+      <div id="skipped" class="skipped" hidden></div>
+    </section>
+
+    <script src="dataset-store.js"></script>
+    <script>
+      const datasetStore = window.datasetStore || null;
+      const statusEl = document.getElementById("status");
+      const buttonEl = document.getElementById("run-button");
+      const tableBody = document.querySelector("#results-table tbody");
+      const plotsContainer = document.getElementById("plots-container");
+      const skippedContainer = document.getElementById("skipped");
+      const lineAxisSelect = document.getElementById("line-axis");
+      const fixedInputs = {
+        x: document.getElementById("fixed-x"),
+        y: document.getElementById("fixed-y"),
+        z: document.getElementById("fixed-z"),
+      };
+      const datasetLabel = document.getElementById("dataset-label");
+      const useSavedDatasetButton = document.getElementById("use-saved-dataset");
+      const fileInput = document.getElementById("csv-input");
+      const resetDatasetButton = document.getElementById("reset-dataset");
+
+      if (buttonEl) {
+        buttonEl.disabled = true;
+      }
+
+      let latestSummaries = [];
+      let latestLineResults = [];
+      let latestDataset = null;
+      let importedDataset = null;
+      let importedDatasetName = "";
+      let sessionReady = false;
+      let trainingPromise = null;
+      let predicting = false;
+      let datasetSource = "none";
+
+      let storedSelection = datasetStore ? datasetStore.load() : null;
+
+      setAxisControlsDisabled(true);
+
+      function currentDatasetLabel() {
+        if (datasetSource === "custom") {
+          return importedDatasetName || "インポートデータ";
+        }
+        if (datasetSource === "dummy") {
+          return "ダミーデータ";
+        }
+        return "データ未読み込み";
+      }
+
+      function updateDatasetLabel() {
+        if (!datasetLabel) {
+          return;
+        }
+        if (datasetSource === "custom") {
+          datasetLabel.textContent = `現在: ${
+            importedDatasetName || "インポートデータ"
+          } を使用`;
+        } else if (datasetSource === "dummy") {
+          datasetLabel.textContent = "現在: ダミーデータを使用";
+        } else {
+          datasetLabel.textContent = "現在: データ未読み込み";
+        }
+      }
+
+      function refreshStoredDatasetButton() {
+        if (!useSavedDatasetButton) {
+          return;
+        }
+        const hasStored = storedSelection && storedSelection.dataset;
+        useSavedDatasetButton.hidden = !hasStored;
+        if (hasStored) {
+          const label = storedSelection.name || "インポートデータ";
+          useSavedDatasetButton.textContent = `${label} を読み込む`;
+        }
+      }
+
+      function clearVisualizations() {
+        latestSummaries = [];
+        latestLineResults = [];
+        latestDataset = null;
+        renderTableRows([]);
+        if (plotsContainer) {
+          plotsContainer.textContent = "ラインプロットは結果計算後に表示されます。";
+        }
+        if (skippedContainer) {
+          skippedContainer.hidden = true;
+          skippedContainer.textContent = "";
+        }
+      }
+
+      function setAxisControlsDisabled(disabled) {
+        if (lineAxisSelect) {
+          lineAxisSelect.disabled = disabled;
+        }
+        if (disabled) {
+          Object.values(fixedInputs).forEach((input) => {
+            if (input) {
+              input.disabled = true;
+            }
+          });
+        } else {
+          updateFixedControlsState();
+        }
+      }
+
+      function updateFixedControlsState() {
+        const varying = (lineAxisSelect ? lineAxisSelect.value : "z") || "z";
+        Object.entries(fixedInputs).forEach(([axis, input]) => {
+          if (!input) {
+            return;
+          }
+          const parent = input.closest(".fixed-control");
+          const disable = axis === varying.toLowerCase();
+          input.disabled = disable;
+          if (parent) {
+            parent.classList.toggle("disabled", disable);
+          }
+        });
+      }
+
+      function setFixedDefaultsFromBounds(bounds) {
+        if (!Array.isArray(bounds)) {
+          return;
+        }
+        ["x", "y", "z"].forEach((axis, index) => {
+          const input = fixedInputs[axis];
+          if (!input) {
+            return;
+          }
+          const entry = bounds[index];
+          if (!Array.isArray(entry) || entry.length < 2) {
+            return;
+          }
+          const minValue = Number(entry[0]);
+          const maxValue = Number(entry[1]);
+          if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+            return;
+          }
+          const midpoint = (minValue + maxValue) / 2;
+          const current = Number.parseFloat(input.value);
+          if (!Number.isFinite(current)) {
+            input.value = String(midpoint);
+          }
+        });
+      }
+
+      function applyFixedAxesFromResult(fixedMap) {
+        if (!fixedMap || typeof fixedMap !== "object") {
+          return;
+        }
+        Object.entries(fixedInputs).forEach(([axis, input]) => {
+          if (!input) {
+            return;
+          }
+          const rawValue = fixedMap[axis];
+          const numericValue = Number(rawValue);
+          if (Number.isFinite(numericValue)) {
+            input.value = String(numericValue);
+          }
+        });
+      }
+
+      function parseCsvDataset(text) {
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+        if (!lines.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        let startIndex = 0;
+        let columnOrder = [0, 1, 2, 3];
+        const firstCells = lines[0].split(",").map((cell) => cell.trim());
+        const lowerHeader = firstCells.map((cell) => cell.toLowerCase());
+        const hasHeader =
+          lowerHeader.includes("x") ||
+          lowerHeader.includes("y") ||
+          lowerHeader.includes("z") ||
+          lowerHeader.includes("value");
+
+        if (hasHeader) {
+          const required = ["x", "y", "z", "value"];
+          columnOrder = required.map((key) => {
+            const index = lowerHeader.indexOf(key);
+            if (index === -1) {
+              throw new Error("ヘッダーには x, y, z, value の列が必要です。");
+            }
+            return index;
+          });
+          startIndex = 1;
+        } else if (firstCells.length < 4) {
+          throw new Error("各行には少なくとも4列の数値が必要です。");
+        }
+
+        const points = [];
+        const values = [];
+        for (let rowIndex = startIndex; rowIndex < lines.length; rowIndex += 1) {
+          const row = lines[rowIndex];
+          if (!row) {
+            continue;
+          }
+          const cells = row.split(",").map((cell) => cell.trim());
+          if (cells.length < 4) {
+            throw new Error(`行 ${rowIndex + 1} に十分な列がありません。`);
+          }
+          const pick = (index) => {
+            if (index >= cells.length) {
+              throw new Error(`行 ${rowIndex + 1} の列数が足りません。`);
+            }
+            return cells[index];
+          };
+          const x = Number(pick(columnOrder[0]));
+          const y = Number(pick(columnOrder[1]));
+          const z = Number(pick(columnOrder[2]));
+          const value = Number(pick(columnOrder[3]));
+          if (
+            !Number.isFinite(x) ||
+            !Number.isFinite(y) ||
+            !Number.isFinite(z) ||
+            !Number.isFinite(value)
+          ) {
+            throw new Error(`行 ${rowIndex + 1} に数値以外の値が含まれています。`);
+          }
+          points.push([x, y, z]);
+          values.push(value);
+        }
+
+        if (!points.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        return { points, values };
+      }
+
+      refreshStoredDatasetButton();
+      updateDatasetLabel();
+      updateFixedControlsState();
+      clearVisualizations();
+
+      const worker = new Worker("pyodide-worker.js");
+      let workerRequestId = 0;
+      const workerRequests = new Map();
+
+      function callWorker(type, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++workerRequestId;
+          workerRequests.set(id, { resolve, reject });
+          worker.postMessage({ id, type, payload });
+        });
+      }
+
+      worker.addEventListener("message", (event) => {
+        const data = event.data || {};
+        if (data.type === "status" && data.message) {
+          statusEl.textContent = data.message;
+          return;
+        }
+        if (!data.id) {
+          return;
+        }
+        const entry = workerRequests.get(data.id);
+        if (!entry) {
+          return;
+        }
+        workerRequests.delete(data.id);
+        if (data.error) {
+          const error = new Error(data.error.message || "ワーカーエラーが発生しました");
+          if (data.error.stack) {
+            error.stack = data.error.stack;
+          }
+          entry.reject(error);
+        } else {
+          entry.resolve(data.result);
+        }
+      });
+
+      worker.addEventListener("error", (event) => {
+        console.error(event);
+        statusEl.textContent = "Pyodideワーカーでエラーが発生しました";
+        if (buttonEl) {
+          buttonEl.disabled = true;
+        }
+      });
+
+      const pyodideReadyPromise = callWorker("init")
+        .then(() => {
+          statusEl.textContent = "準備完了。まずデータを読み込んで学習してください。";
+        })
+        .catch((error) => {
+          const message = error && error.message ? error.message : String(error);
+          statusEl.textContent = "初期化に失敗しました: " + message;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          throw error;
+        });
+
+      if (fileInput) {
+        fileInput.addEventListener("change", async (event) => {
+          const target = event.target;
+          const file = target && target.files ? target.files[0] : null;
+          if (!file) {
+            statusEl.textContent = "ファイルが選択されていません。";
+            return;
+          }
+
+          statusEl.textContent = `${file.name} を読み込み中...`;
+          try {
+            const text = await file.text();
+            const parsedDataset = parseCsvDataset(text);
+            importedDataset = parsedDataset;
+            importedDatasetName = file.name;
+            datasetSource = "custom";
+            if (datasetStore && typeof datasetStore.save === "function") {
+              datasetStore.save({
+                name: importedDatasetName,
+                dataset: importedDataset,
+              });
+            }
+            storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+            refreshStoredDatasetButton();
+            updateDatasetLabel();
+            statusEl.textContent = `${file.name} を読み込みました。学習を開始します...`;
+            await trainCurrentDataset();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
+            if (target) {
+              target.value = "";
+            }
+          }
+        });
+      }
+
+      if (useSavedDatasetButton) {
+        useSavedDatasetButton.addEventListener("click", async () => {
+          storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+          if (!storedSelection || !storedSelection.dataset) {
+            refreshStoredDatasetButton();
+            statusEl.textContent = "保存済みデータはありません。";
+            return;
+          }
+          importedDataset = storedSelection.dataset;
+          importedDatasetName = storedSelection.name || "インポートデータ";
+          datasetSource = "custom";
+          updateDatasetLabel();
+          statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
+          await trainCurrentDataset();
+        });
+      }
+
+      if (resetDatasetButton) {
+        resetDatasetButton.addEventListener("click", async () => {
+          importedDataset = null;
+          importedDatasetName = "";
+          datasetSource = "dummy";
+          if (fileInput) {
+            fileInput.value = "";
+          }
+          if (datasetStore && typeof datasetStore.clear === "function") {
+            datasetStore.clear();
+          }
+          storedSelection = null;
+          refreshStoredDatasetButton();
+          updateDatasetLabel();
+          statusEl.textContent = "ダミーデータを読み込みました。学習を実行します...";
+          await trainCurrentDataset();
+        });
+      }
+
+      function renderTableRows(items) {
+        if (!tableBody) {
+          return;
+        }
+        tableBody.innerHTML = "";
+        if (!items.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 5;
+          cell.textContent = "結果はまだ計算されていません。";
+          row.appendChild(cell);
+          tableBody.appendChild(row);
+          return;
+        }
+        items.forEach((item) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${item.method}</td>
+            <td>${item.smoothness_class}</td>
+            <td>${Number(item.rmse).toFixed(4)}</td>
+            <td>${Number(item.gradient_smoothness).toFixed(4)}</td>
+            <td>${Number(item.laplacian_smoothness).toFixed(4)}</td>
+          `;
+          tableBody.appendChild(row);
+        });
+      }
+
+      function buildDatasetProjectionTrace(dataset, axisLabel) {
+        if (
+          !dataset ||
+          typeof dataset !== "object" ||
+          !Array.isArray(dataset.points) ||
+          !Array.isArray(dataset.values) ||
+          dataset.points.length !== dataset.values.length
+        ) {
+          return null;
+        }
+        const axisMap = { x: 0, y: 1, z: 2 };
+        const axisIndex = axisMap[axisLabel ? axisLabel.toLowerCase() : ""];
+        if (!Number.isInteger(axisIndex)) {
+          return null;
+        }
+        const xs = [];
+        const ys = [];
+        for (let i = 0; i < dataset.points.length; i += 1) {
+          const point = dataset.points[i];
+          const value = dataset.values[i];
+          if (!Array.isArray(point) || point.length < 3) {
+            continue;
+          }
+          const axisValue = Number(point[axisIndex]);
+          const numericValue = Number(value);
+          if (!Number.isFinite(axisValue) || !Number.isFinite(numericValue)) {
+            continue;
+          }
+          xs.push(axisValue);
+          ys.push(numericValue);
+        }
+        if (!xs.length) {
+          return null;
+        }
+        return {
+          type: "scatter",
+          mode: "markers",
+          x: xs,
+          y: ys,
+          name: "元データ",
+          marker: {
+            size: 7,
+            color: "rgba(244,67,54,0.75)",
+            line: { width: 1, color: "rgba(183,28,28,0.9)" },
+          },
+          hovertemplate: `${axisLabel}=%{x}<br>Value=%{y}<extra>元データ</extra>`,
+        };
+      }
+
+      function renderLinePlots(results) {
+        if (!plotsContainer) {
+          return;
+        }
+        plotsContainer.innerHTML = "";
+        if (!results.length) {
+          plotsContainer.textContent = "ラインプロットを生成できませんでした。";
+          return;
+        }
+        results.forEach((item, index) => {
+          const card = document.createElement("section");
+          card.className = "plot-card";
+          const title = document.createElement("h3");
+          title.textContent = `${item.method} (${item.smoothness_class})`;
+          card.appendChild(title);
+
+          const caption = document.createElement("p");
+          const fixedText = Array.isArray(item.fixed_axes)
+            ? item.fixed_axes
+                .map((pair) => `${pair[0]}=${Number(pair[1]).toFixed(3)}`)
+                .join(", ")
+            : "";
+          caption.style.margin = "0";
+          caption.textContent = `${item.varying_axis_label}-軸方向のライン。固定: ${fixedText}`;
+          card.appendChild(caption);
+
+          const plotDiv = document.createElement("div");
+          plotDiv.className = "plot-container";
+          plotDiv.id = `line-plot-${index}`;
+          card.appendChild(plotDiv);
+          plotsContainer.appendChild(card);
+
+          const xValues = Array.isArray(item.axis_values)
+            ? item.axis_values.map((value) => Number(value))
+            : [];
+          const yValues = Array.isArray(item.predicted_values)
+            ? item.predicted_values.map((value) => Number(value))
+            : [];
+
+          const predictionTrace = {
+            type: "scatter",
+            mode: "lines+markers",
+            x: xValues,
+            y: yValues,
+            name: item.method,
+            line: { shape: "spline", color: "#2962ff" },
+            marker: { size: 6, color: "#ff6d00" },
+            hovertemplate: `${item.varying_axis_label}=%{x}<br>Value=%{y}<extra>${item.method}</extra>`,
+          };
+
+          const datasetTrace = buildDatasetProjectionTrace(
+            latestDataset,
+            item.varying_axis_label
+          );
+
+          const traces = datasetTrace ? [datasetTrace, predictionTrace] : [predictionTrace];
+
+          const layout = {
+            margin: { l: 40, r: 10, t: 10, b: 40 },
+            xaxis: { title: `${item.varying_axis_label} 軸` },
+            yaxis: { title: "予測値" },
+            height: 300,
+            showlegend: Boolean(datasetTrace),
+            legend: { orientation: "h", y: -0.2 },
+          };
+
+          Plotly.newPlot(plotDiv, traces, layout, {
+            responsive: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ["toImage"],
+          });
+        });
+      }
+
+      async function runLinePrediction() {
+        if (predicting) {
+          return;
+        }
+        if (!sessionReady) {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
+        }
+        predicting = true;
+        if (buttonEl) {
+          buttonEl.disabled = true;
+        }
+        setAxisControlsDisabled(true);
+        statusEl.textContent = "Python計算を実行中 (predictのみ)...";
+        try {
+          await pyodideReadyPromise;
+          const axis = lineAxisSelect ? lineAxisSelect.value || "z" : "z";
+          const fixedPayload = {};
+          Object.entries(fixedInputs).forEach(([key, input]) => {
+            if (!input || key === axis.toLowerCase()) {
+              return;
+            }
+            const parsed = Number.parseFloat(input.value);
+            if (Number.isFinite(parsed)) {
+              fixedPayload[key] = parsed;
+            }
+          });
+          const result = await callWorker("predictLine", {
+            lineAxis: axis,
+            fixedValues: fixedPayload,
+          });
+          latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
+          latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];
+          latestDataset = result.dataset || null;
+          renderTableRows(latestSummaries);
+          renderLinePlots(latestLineResults);
+          applyFixedAxesFromResult(result.fixed_axes);
+          if (lineAxisSelect && result.line_axis) {
+            lineAxisSelect.value = result.line_axis;
+            updateFixedControlsState();
+          }
+          if (latestDataset && Array.isArray(latestDataset.axis_bounds)) {
+            setFixedDefaultsFromBounds(latestDataset.axis_bounds);
+          }
+          if (result.skipped && result.skipped.length) {
+            skippedContainer.hidden = false;
+            skippedContainer.innerHTML =
+              "<strong>スキップされた手法:</strong><ul>" +
+              result.skipped
+                .map((item) => `<li><code>${item[0]}</code>: ${item[1]}</li>`)
+                .join("") +
+              "</ul>";
+          } else {
+            skippedContainer.hidden = true;
+            skippedContainer.textContent = "";
+          }
+          const datasetSource = result.dataset_source || (latestDataset && latestDataset.source);
+          if (datasetSource === "custom") {
+            const label = importedDatasetName || "インポートデータ";
+            statusEl.textContent = `${label} でライン計算が完了しました。`;
+          } else {
+            statusEl.textContent = "ダミーデータでライン計算が完了しました。";
+          }
+        } catch (error) {
+          console.error(error);
+          const message = error instanceof Error ? error.message : String(error);
+          statusEl.textContent = "ライン計算に失敗しました: " + message;
+        } finally {
+          predicting = false;
+          if (buttonEl) {
+            buttonEl.disabled = !sessionReady;
+          }
+          setAxisControlsDisabled(!sessionReady);
+        }
+      }
+
+      async function trainCurrentDataset() {
+        if (datasetSource === "none") {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
+        }
+        if (trainingPromise) {
+          await trainingPromise;
+          return trainCurrentDataset();
+        }
+        trainingPromise = (async () => {
+          sessionReady = false;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          setAxisControlsDisabled(true);
+          clearVisualizations();
+          const label = currentDatasetLabel();
+          statusEl.textContent = `${label} を用いて学習中...`;
+          try {
+            await pyodideReadyPromise;
+            await callWorker("fit", {
+              dataset: datasetSource === "custom" ? importedDataset : null,
+            });
+            sessionReady = true;
+            statusEl.textContent = `${label} の学習が完了しました。ラインを計算ボタンでpredictを実行してください。`;
+          } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = "学習に失敗しました: " + message;
+            sessionReady = false;
+          } finally {
+            if (!sessionReady && buttonEl) {
+              buttonEl.disabled = true;
+            }
+            if (sessionReady && buttonEl && !predicting) {
+              buttonEl.disabled = false;
+            }
+            setAxisControlsDisabled(!sessionReady);
+            trainingPromise = null;
+          }
+        })();
+        await trainingPromise;
+      }
+
+
+      if (buttonEl) {
+        buttonEl.addEventListener("click", () => runLinePrediction());
+      }
+      if (lineAxisSelect) {
+        lineAxisSelect.addEventListener("change", () => {
+          updateFixedControlsState();
+        });
+      }
+    </script>
+  </body>
+</html>
