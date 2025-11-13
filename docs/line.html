@@ -616,6 +616,55 @@
         });
       }
 
+      function buildDatasetProjectionTrace(dataset, axisLabel) {
+        if (
+          !dataset ||
+          typeof dataset !== "object" ||
+          !Array.isArray(dataset.points) ||
+          !Array.isArray(dataset.values) ||
+          dataset.points.length !== dataset.values.length
+        ) {
+          return null;
+        }
+        const axisMap = { x: 0, y: 1, z: 2 };
+        const axisIndex = axisMap[axisLabel ? axisLabel.toLowerCase() : ""];
+        if (!Number.isInteger(axisIndex)) {
+          return null;
+        }
+        const xs = [];
+        const ys = [];
+        for (let i = 0; i < dataset.points.length; i += 1) {
+          const point = dataset.points[i];
+          const value = dataset.values[i];
+          if (!Array.isArray(point) || point.length < 3) {
+            continue;
+          }
+          const axisValue = Number(point[axisIndex]);
+          const numericValue = Number(value);
+          if (!Number.isFinite(axisValue) || !Number.isFinite(numericValue)) {
+            continue;
+          }
+          xs.push(axisValue);
+          ys.push(numericValue);
+        }
+        if (!xs.length) {
+          return null;
+        }
+        return {
+          type: "scatter",
+          mode: "markers",
+          x: xs,
+          y: ys,
+          name: "元データ",
+          marker: {
+            size: 7,
+            color: "rgba(244,67,54,0.75)",
+            line: { width: 1, color: "rgba(183,28,28,0.9)" },
+          },
+          hovertemplate: `${axisLabel}=%{x}<br>Value=%{y}<extra>元データ</extra>`,
+        };
+      }
+
       function renderLinePlots(results) {
         if (!plotsContainer) {
           return;
@@ -655,24 +704,34 @@
             ? item.predicted_values.map((value) => Number(value))
             : [];
 
-          const trace = {
+          const predictionTrace = {
             type: "scatter",
             mode: "lines+markers",
             x: xValues,
             y: yValues,
+            name: item.method,
             line: { shape: "spline", color: "#2962ff" },
             marker: { size: 6, color: "#ff6d00" },
             hovertemplate: `${item.varying_axis_label}=%{x}<br>Value=%{y}<extra>${item.method}</extra>`,
           };
+
+          const datasetTrace = buildDatasetProjectionTrace(
+            latestDataset,
+            item.varying_axis_label
+          );
+
+          const traces = datasetTrace ? [datasetTrace, predictionTrace] : [predictionTrace];
 
           const layout = {
             margin: { l: 40, r: 10, t: 10, b: 40 },
             xaxis: { title: `${item.varying_axis_label} 軸` },
             yaxis: { title: "予測値" },
             height: 300,
+            showlegend: Boolean(datasetTrace),
+            legend: { orientation: "h", y: -0.2 },
           };
 
-          Plotly.newPlot(plotDiv, [trace], layout, {
+          Plotly.newPlot(plotDiv, traces, layout, {
             responsive: true,
             displaylogo: false,
             modeBarButtonsToRemove: ["toImage"],
