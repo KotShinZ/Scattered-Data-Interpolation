@@ -239,8 +239,33 @@
         padding: 1rem;
         display: flex;
         flex-direction: column;
-        gap: 0.4rem;
+        gap: 0.6rem;
         box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+      }
+
+      .plot-card header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.8rem;
+      }
+
+      .plot-card header h3 {
+        margin: 0;
+      }
+
+      .expand-btn {
+        border-radius: 999px;
+        padding: 0.35rem 1rem;
+        font-size: 0.85rem;
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--text-main);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: none;
+      }
+
+      .expand-btn:hover {
+        background: rgba(255, 255, 255, 0.25);
       }
 
       .plot-container {
@@ -264,6 +289,68 @@
         border-radius: 18px;
         background: rgba(255, 255, 255, 0.08);
         color: var(--text-muted);
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 8, 20, 0.7);
+        z-index: 90;
+        display: none;
+      }
+
+      .modal-backdrop.open {
+        display: block;
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 95;
+        padding: 2rem;
+      }
+
+      .modal.open {
+        display: flex;
+      }
+
+      .modal-content {
+        width: min(1200px, 95vw);
+        height: min(85vh, 720px);
+        background: rgba(9, 12, 30, 0.9);
+        border-radius: 32px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 25px 90px rgba(0, 0, 0, 0.55);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .modal header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .modal h3 {
+        margin: 0;
+      }
+
+      .modal-close {
+        align-self: flex-start;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 999px;
+        padding: 0.45rem 1.2rem;
+        font-size: 0.9rem;
+      }
+
+      #modal-plot {
+        flex: 1;
       }
 
       a {
@@ -331,6 +418,33 @@
             </label>
           </div>
         </article>
+
+        <article class="panel">
+          <h2>表示レンジとズーム</h2>
+          <p>表示範囲を手動で指定したり、拡大ビューで詳細を確認できます。未入力の軸は自動スケールになります。</p>
+          <div class="range-grid">
+            <label class="range-input">
+              <span>X 軸の最小値</span>
+              <input id="x-range-min" type="number" step="any" placeholder="自動" />
+            </label>
+            <label class="range-input">
+              <span>X 軸の最大値</span>
+              <input id="x-range-max" type="number" step="any" placeholder="自動" />
+            </label>
+            <label class="range-input">
+              <span>Y 軸の最小値</span>
+              <input id="y-range-min" type="number" step="any" placeholder="自動" />
+            </label>
+            <label class="range-input">
+              <span>Y 軸の最大値</span>
+              <input id="y-range-max" type="number" step="any" placeholder="自動" />
+            </label>
+          </div>
+          <div class="range-actions">
+            <button id="apply-range" type="button">表示範囲を適用</button>
+            <button id="reset-range" type="button">リセット</button>
+          </div>
+        </article>
       </section>
 
       <section class="panel">
@@ -355,7 +469,18 @@
       </section>
     </div>
 
-<script src="dataset-store.js"></script>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal" id="plot-modal" aria-hidden="true">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header>
+          <h3 id="modal-title">拡大表示</h3>
+          <button type="button" class="modal-close" id="modal-close">閉じる</button>
+        </header>
+        <div id="modal-plot"></div>
+      </div>
+    </div>
+
+    <script src="dataset-store.js"></script>
     <script>
       const datasetStore = window.datasetStore || null;
       const statusEl = document.getElementById("status");
@@ -373,6 +498,19 @@
       const useSavedDatasetButton = document.getElementById("use-saved-dataset");
       const fileInput = document.getElementById("csv-input");
       const resetDatasetButton = document.getElementById("reset-dataset");
+      const rangeInputs = {
+        xMin: document.getElementById("x-range-min"),
+        xMax: document.getElementById("x-range-max"),
+        yMin: document.getElementById("y-range-min"),
+        yMax: document.getElementById("y-range-max"),
+      };
+      const rangeApplyButton = document.getElementById("apply-range");
+      const rangeResetButton = document.getElementById("reset-range");
+      const modalBackdrop = document.getElementById("modal-backdrop");
+      const plotModal = document.getElementById("plot-modal");
+      const modalPlotEl = document.getElementById("modal-plot");
+      const modalTitleEl = document.getElementById("modal-title");
+      const modalCloseButton = document.getElementById("modal-close");
 
       if (buttonEl) {
         buttonEl.disabled = true;
@@ -389,8 +527,37 @@
       let datasetSource = "none";
 
       let storedSelection = datasetStore ? datasetStore.load() : null;
+      const manualAxisRanges = {
+        x: { min: null, max: null },
+        y: { min: null, max: null },
+      };
+      const plotlyConfig = {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ["toImage"],
+        scrollZoom: true,
+      };
 
       setAxisControlsDisabled(true);
+      syncRangeInputsFromState();
+
+      if (rangeApplyButton) {
+        rangeApplyButton.addEventListener("click", applyAxisRangeSettings);
+      }
+      if (rangeResetButton) {
+        rangeResetButton.addEventListener("click", handleRangeReset);
+      }
+      Object.values(rangeInputs).forEach((input) => {
+        if (!input) {
+          return;
+        }
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyAxisRangeSettings();
+          }
+        });
+      });
 
       function currentDatasetLabel() {
         if (datasetSource === "custom") {
@@ -429,11 +596,130 @@
         }
       }
 
+      function parseRangeInputValue(input) {
+        if (!input) {
+          return null;
+        }
+        const trimmed = (input.value || "").trim();
+        if (!trimmed) {
+          return null;
+        }
+        const parsed = Number.parseFloat(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function syncRangeInputsFromState() {
+        if (rangeInputs.xMin) {
+          rangeInputs.xMin.value = manualAxisRanges.x.min ?? "";
+        }
+        if (rangeInputs.xMax) {
+          rangeInputs.xMax.value = manualAxisRanges.x.max ?? "";
+        }
+        if (rangeInputs.yMin) {
+          rangeInputs.yMin.value = manualAxisRanges.y.min ?? "";
+        }
+        if (rangeInputs.yMax) {
+          rangeInputs.yMax.value = manualAxisRanges.y.max ?? "";
+        }
+      }
+
+      function updateManualAxisRangesFromInputs() {
+        manualAxisRanges.x.min = parseRangeInputValue(rangeInputs.xMin);
+        manualAxisRanges.x.max = parseRangeInputValue(rangeInputs.xMax);
+        manualAxisRanges.y.min = parseRangeInputValue(rangeInputs.yMin);
+        manualAxisRanges.y.max = parseRangeInputValue(rangeInputs.yMax);
+      }
+
+      function resetAxisRanges() {
+        manualAxisRanges.x.min = null;
+        manualAxisRanges.x.max = null;
+        manualAxisRanges.y.min = null;
+        manualAxisRanges.y.max = null;
+        syncRangeInputsFromState();
+      }
+
+      function applyAxisRangeSettings() {
+        updateManualAxisRangesFromInputs();
+        renderLinePlots(latestLineResults);
+      }
+
+      function handleRangeReset() {
+        resetAxisRanges();
+        renderLinePlots(latestLineResults);
+      }
+
+      function filterFinite(values) {
+        if (!Array.isArray(values)) {
+          return [];
+        }
+        return values
+          .map((value) => Number.parseFloat(value))
+          .filter((value) => Number.isFinite(value));
+      }
+
+      function computeAxisRange(manualRange, fallbackValues) {
+        const finiteValues = filterFinite(fallbackValues || []);
+        const hasManualMin = Number.isFinite(manualRange.min);
+        const hasManualMax = Number.isFinite(manualRange.max);
+        if (hasManualMin && hasManualMax) {
+          return [manualRange.min, manualRange.max];
+        }
+        if (!finiteValues.length) {
+          return null;
+        }
+        const fallbackMin = Math.min(...finiteValues);
+        const fallbackMax = Math.max(...finiteValues);
+        const resolvedMin = hasManualMin ? manualRange.min : fallbackMin;
+        const resolvedMax = hasManualMax ? manualRange.max : fallbackMax;
+        if (Number.isFinite(resolvedMin) && Number.isFinite(resolvedMax)) {
+          return [resolvedMin, resolvedMax];
+        }
+        return null;
+      }
+
+      function applyAxisRangesToLayout(layout, item) {
+        if (!layout || !item) {
+          return;
+        }
+        layout.xaxis = layout.xaxis || {};
+        layout.yaxis = layout.yaxis || {};
+        const xRange = computeAxisRange(manualAxisRanges.x, item.axis_values || []);
+        if (xRange) {
+          layout.xaxis.range = xRange;
+          layout.xaxis.autorange = false;
+        } else {
+          delete layout.xaxis.range;
+          layout.xaxis.autorange = true;
+        }
+        const datasetValues = Array.isArray(latestDataset?.values)
+          ? latestDataset.values
+          : [];
+        const yRange = computeAxisRange(
+          manualAxisRanges.y,
+          (item.predicted_values || []).concat(datasetValues)
+        );
+        if (yRange) {
+          layout.yaxis.range = yRange;
+          layout.yaxis.autorange = false;
+        } else {
+          delete layout.yaxis.range;
+          layout.yaxis.autorange = true;
+        }
+      }
+
+      function cloneTraces(traces) {
+        if (!Array.isArray(traces)) {
+          return [];
+        }
+        return traces.map((trace) => JSON.parse(JSON.stringify(trace)));
+      }
+
       function clearVisualizations() {
         latestSummaries = [];
         latestLineResults = [];
         latestDataset = null;
         renderTableRows([]);
+        resetAxisRanges();
         if (plotsContainer) {
           plotsContainer.textContent = "ラインプロットは結果計算後に表示されます。";
         }
@@ -768,19 +1054,26 @@
         }
         const xs = [];
         const ys = [];
+        const customData = [];
         for (let i = 0; i < dataset.points.length; i += 1) {
           const point = dataset.points[i];
           const value = dataset.values[i];
           if (!Array.isArray(point) || point.length < 3) {
             continue;
           }
+          const numericPoint = point.map((coord) => Number(coord));
           const axisValue = Number(point[axisIndex]);
           const numericValue = Number(value);
-          if (!Number.isFinite(axisValue) || !Number.isFinite(numericValue)) {
+          if (
+            numericPoint.some((coord) => !Number.isFinite(coord)) ||
+            !Number.isFinite(axisValue) ||
+            !Number.isFinite(numericValue)
+          ) {
             continue;
           }
           xs.push(axisValue);
           ys.push(numericValue);
+          customData.push([numericPoint[0], numericPoint[1], numericPoint[2], numericValue]);
         }
         if (!xs.length) {
           return null;
@@ -791,13 +1084,83 @@
           x: xs,
           y: ys,
           name: "元データ",
+          customdata: customData,
           marker: {
             size: 7,
             color: "rgba(244,67,54,0.75)",
             line: { width: 1, color: "rgba(183,28,28,0.9)" },
           },
-          hovertemplate: `${axisLabel}=%{x}<br>Value=%{y}<extra>元データ</extra>`,
+          hovertemplate:
+            "x=%{customdata[0]:.4f}<br>y=%{customdata[1]:.4f}<br>z=%{customdata[2]:.4f}<br>value=%{customdata[3]:.4f}<extra>元データ</extra>",
         };
+      }
+
+      function openPlotModal(title, payload) {
+        if (!plotModal || !modalPlotEl || !payload) {
+          return;
+        }
+        if (modalTitleEl) {
+          modalTitleEl.textContent = title || "拡大表示";
+        }
+        if (modalBackdrop) {
+          modalBackdrop.classList.add("open");
+        }
+        plotModal.classList.add("open");
+        plotModal.setAttribute("aria-hidden", "false");
+        const layout = JSON.parse(JSON.stringify(payload.layout || {}));
+        layout.height = modalPlotEl.clientHeight || 520;
+        layout.margin = Object.assign({ l: 60, r: 30, t: 40, b: 50 }, layout.margin || {});
+        Plotly.newPlot(modalPlotEl, cloneTraces(payload.traces), layout, plotlyConfig);
+      }
+
+      function closePlotModal() {
+        if (plotModal) {
+          plotModal.classList.remove("open");
+          plotModal.setAttribute("aria-hidden", "true");
+        }
+        if (modalBackdrop) {
+          modalBackdrop.classList.remove("open");
+        }
+        if (modalPlotEl && window.Plotly && typeof Plotly.purge === "function") {
+          Plotly.purge(modalPlotEl);
+        }
+      }
+
+      function buildPlotPayload(item) {
+        if (!item) {
+          return null;
+        }
+        const axisValues = Array.isArray(item.axis_values)
+          ? item.axis_values.map((value) => Number(value))
+          : [];
+        const predictedValues = Array.isArray(item.predicted_values)
+          ? item.predicted_values.map((value) => Number(value))
+          : [];
+        const datasetTrace = buildDatasetProjectionTrace(
+          latestDataset,
+          item.varying_axis_label
+        );
+        const predictionTrace = {
+          type: "scatter",
+          mode: "lines+markers",
+          x: axisValues,
+          y: predictedValues,
+          name: item.method,
+          line: { width: 3 },
+          marker: { size: 6 },
+          hovertemplate: `${item.varying_axis_label}=%{x}<br>Value=%{y}<extra>${item.method}</extra>`,
+        };
+        const traces = datasetTrace ? [datasetTrace, predictionTrace] : [predictionTrace];
+        const layout = {
+          margin: { l: 40, r: 10, t: 10, b: 40 },
+          xaxis: { title: `${item.varying_axis_label} 軸` },
+          yaxis: { title: "予測値" },
+          height: 320,
+          showlegend: Boolean(datasetTrace),
+          legend: { orientation: "h", y: -0.2 },
+        };
+        applyAxisRangesToLayout(layout, item);
+        return { traces, layout };
       }
 
       function renderLinePlots(results) {
@@ -809,12 +1172,19 @@
           plotsContainer.textContent = "ラインプロットを生成できませんでした。";
           return;
         }
-        results.forEach((item, index) => {
+        results.forEach((item) => {
           const card = document.createElement("section");
           card.className = "plot-card";
+          const header = document.createElement("header");
           const title = document.createElement("h3");
           title.textContent = `${item.method} (${item.smoothness_class})`;
-          card.appendChild(title);
+          header.appendChild(title);
+          const expandButton = document.createElement("button");
+          expandButton.type = "button";
+          expandButton.className = "expand-btn";
+          expandButton.textContent = "拡大表示";
+          header.appendChild(expandButton);
+          card.appendChild(header);
 
           const caption = document.createElement("p");
           const fixedText = Array.isArray(item.fixed_axes)
@@ -828,51 +1198,44 @@
 
           const plotDiv = document.createElement("div");
           plotDiv.className = "plot-container";
-          plotDiv.id = `line-plot-${index}`;
           card.appendChild(plotDiv);
           plotsContainer.appendChild(card);
 
-          const xValues = Array.isArray(item.axis_values)
-            ? item.axis_values.map((value) => Number(value))
-            : [];
-          const yValues = Array.isArray(item.predicted_values)
-            ? item.predicted_values.map((value) => Number(value))
-            : [];
-
-          const predictionTrace = {
-            type: "scatter",
-            mode: "lines+markers",
-            x: xValues,
-            y: yValues,
-            name: item.method,
-            line: { shape: "spline", color: "#2962ff" },
-            marker: { size: 6, color: "#ff6d00" },
-            hovertemplate: `${item.varying_axis_label}=%{x}<br>Value=%{y}<extra>${item.method}</extra>`,
-          };
-
-          const datasetTrace = buildDatasetProjectionTrace(
-            latestDataset,
-            item.varying_axis_label
+          const payload = buildPlotPayload(item);
+          if (!payload) {
+            return;
+          }
+          Plotly.newPlot(
+            plotDiv,
+            cloneTraces(payload.traces),
+            { ...payload.layout },
+            plotlyConfig
           );
 
-          const traces = datasetTrace ? [datasetTrace, predictionTrace] : [predictionTrace];
-
-          const layout = {
-            margin: { l: 40, r: 10, t: 10, b: 40 },
-            xaxis: { title: `${item.varying_axis_label} 軸` },
-            yaxis: { title: "予測値" },
-            height: 300,
-            showlegend: Boolean(datasetTrace),
-            legend: { orientation: "h", y: -0.2 },
-          };
-
-          Plotly.newPlot(plotDiv, traces, layout, {
-            responsive: true,
-            displaylogo: false,
-            modeBarButtonsToRemove: ["toImage"],
+          expandButton.addEventListener("click", () => {
+            openPlotModal(title.textContent, buildPlotPayload(item));
           });
         });
       }
+
+      if (modalCloseButton) {
+        modalCloseButton.addEventListener("click", closePlotModal);
+      }
+      if (modalBackdrop) {
+        modalBackdrop.addEventListener("click", closePlotModal);
+      }
+      if (plotModal) {
+        plotModal.addEventListener("click", (event) => {
+          if (event.target === plotModal) {
+            closePlotModal();
+          }
+        });
+      }
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closePlotModal();
+        }
+      });
 
       async function runLinePrediction() {
         if (predicting) {
