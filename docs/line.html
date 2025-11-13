@@ -185,11 +185,12 @@
         <label for="csv-input">CSVをインポート:</label>
         <input id="csv-input" type="file" accept=".csv,text/csv" />
         <button id="reset-dataset" type="button">ダミーデータを使用</button>
-        <span id="dataset-label">現在: ダミーデータを使用</span>
+        <button id="use-saved-dataset" type="button" hidden>保存済みデータを読み込む</button>
+        <span id="dataset-label">現在: データ未読み込み</span>
       </div>
       <p style="margin: 0.5rem 0 0; font-size: 0.95rem;">
         CSV には <code>x,y,z,value</code> の 4 列を含めてください（ヘッダー行は任意）。
-        ファイルを読み込むまでは付属のダミーデータで学習します。
+        データを読み込むまでは学習・予測は実行されません。
       </p>
     </header>
 
@@ -234,6 +235,7 @@
         z: document.getElementById("fixed-z"),
       };
       const datasetLabel = document.getElementById("dataset-label");
+      const useSavedDatasetButton = document.getElementById("use-saved-dataset");
       const fileInput = document.getElementById("csv-input");
       const resetDatasetButton = document.getElementById("reset-dataset");
 
@@ -249,23 +251,60 @@
       let sessionReady = false;
       let trainingPromise = null;
       let predicting = false;
+      let datasetSource = "none";
 
-      const storedSelection = datasetStore ? datasetStore.load() : null;
-      if (storedSelection && storedSelection.dataset) {
-        importedDataset = storedSelection.dataset;
-        importedDatasetName = storedSelection.name || "インポートデータ";
-      }
+      let storedSelection = datasetStore ? datasetStore.load() : null;
 
       setAxisControlsDisabled(true);
+
+      function currentDatasetLabel() {
+        if (datasetSource === "custom") {
+          return importedDatasetName || "インポートデータ";
+        }
+        if (datasetSource === "dummy") {
+          return "ダミーデータ";
+        }
+        return "データ未読み込み";
+      }
 
       function updateDatasetLabel() {
         if (!datasetLabel) {
           return;
         }
-        if (importedDataset) {
-          datasetLabel.textContent = `現在: ${importedDatasetName || "インポートデータ"} を使用`;
-        } else {
+        if (datasetSource === "custom") {
+          datasetLabel.textContent = `現在: ${
+            importedDatasetName || "インポートデータ"
+          } を使用`;
+        } else if (datasetSource === "dummy") {
           datasetLabel.textContent = "現在: ダミーデータを使用";
+        } else {
+          datasetLabel.textContent = "現在: データ未読み込み";
+        }
+      }
+
+      function refreshStoredDatasetButton() {
+        if (!useSavedDatasetButton) {
+          return;
+        }
+        const hasStored = storedSelection && storedSelection.dataset;
+        useSavedDatasetButton.hidden = !hasStored;
+        if (hasStored) {
+          const label = storedSelection.name || "インポートデータ";
+          useSavedDatasetButton.textContent = `${label} を読み込む`;
+        }
+      }
+
+      function clearVisualizations() {
+        latestSummaries = [];
+        latestLineResults = [];
+        latestDataset = null;
+        renderTableRows([]);
+        if (plotsContainer) {
+          plotsContainer.textContent = "ラインプロットは結果計算後に表示されます。";
+        }
+        if (skippedContainer) {
+          skippedContainer.hidden = true;
+          skippedContainer.textContent = "";
         }
       }
 
@@ -414,8 +453,10 @@
         return { points, values };
       }
 
+      refreshStoredDatasetButton();
       updateDatasetLabel();
       updateFixedControlsState();
+      clearVisualizations();
 
       const worker = new Worker("pyodide-worker.js");
       let workerRequestId = 0;
@@ -464,7 +505,7 @@
 
       const pyodideReadyPromise = callWorker("init")
         .then(() => {
-          statusEl.textContent = "準備完了。データを学習しています...";
+          statusEl.textContent = "準備完了。まずデータを読み込んで学習してください。";
         })
         .catch((error) => {
           const message = error && error.message ? error.message : String(error);
@@ -475,52 +516,57 @@
           throw error;
         });
 
-      pyodideReadyPromise
-        .then(() => trainCurrentDataset())
-        .catch((error) => console.error(error));
-
       if (fileInput) {
         fileInput.addEventListener("change", async (event) => {
           const target = event.target;
           const file = target && target.files ? target.files[0] : null;
           if (!file) {
-            importedDataset = null;
-            importedDatasetName = "";
-            if (datasetStore && typeof datasetStore.clear === "function") {
-              datasetStore.clear();
-            }
-            updateDatasetLabel();
-            statusEl.textContent = "ダミーデータを使用します。学習を実行します...";
-            await trainCurrentDataset();
+            statusEl.textContent = "ファイルが選択されていません。";
             return;
           }
 
           statusEl.textContent = `${file.name} を読み込み中...`;
           try {
             const text = await file.text();
-            importedDataset = parseCsvDataset(text);
+            const parsedDataset = parseCsvDataset(text);
+            importedDataset = parsedDataset;
             importedDatasetName = file.name;
+            datasetSource = "custom";
             if (datasetStore && typeof datasetStore.save === "function") {
               datasetStore.save({
                 name: importedDatasetName,
                 dataset: importedDataset,
               });
             }
+            storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+            refreshStoredDatasetButton();
             updateDatasetLabel();
             statusEl.textContent = `${file.name} を読み込みました。学習を開始します...`;
             await trainCurrentDataset();
           } catch (error) {
-            importedDataset = null;
-            importedDatasetName = "";
-            if (datasetStore && typeof datasetStore.clear === "function") {
-              datasetStore.clear();
-            }
-            updateDatasetLabel();
             const message = error instanceof Error ? error.message : String(error);
             statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
-            target.value = "";
-            await trainCurrentDataset();
+            if (target) {
+              target.value = "";
+            }
           }
+        });
+      }
+
+      if (useSavedDatasetButton) {
+        useSavedDatasetButton.addEventListener("click", async () => {
+          storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+          if (!storedSelection || !storedSelection.dataset) {
+            refreshStoredDatasetButton();
+            statusEl.textContent = "保存済みデータはありません。";
+            return;
+          }
+          importedDataset = storedSelection.dataset;
+          importedDatasetName = storedSelection.name || "インポートデータ";
+          datasetSource = "custom";
+          updateDatasetLabel();
+          statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
+          await trainCurrentDataset();
         });
       }
 
@@ -528,14 +574,17 @@
         resetDatasetButton.addEventListener("click", async () => {
           importedDataset = null;
           importedDatasetName = "";
+          datasetSource = "dummy";
           if (fileInput) {
             fileInput.value = "";
           }
           if (datasetStore && typeof datasetStore.clear === "function") {
             datasetStore.clear();
           }
+          storedSelection = null;
+          refreshStoredDatasetButton();
           updateDatasetLabel();
-          statusEl.textContent = "ダミーデータに戻しました。再学習を実行します...";
+          statusEl.textContent = "ダミーデータを読み込みました。学習を実行します...";
           await trainCurrentDataset();
         });
       }
@@ -631,7 +680,7 @@
         });
       }
 
-      async function runLinePrediction(options = {}) {
+      async function runLinePrediction() {
         if (predicting) {
           return;
         }
@@ -644,9 +693,7 @@
           buttonEl.disabled = true;
         }
         setAxisControlsDisabled(true);
-        statusEl.textContent = options.fromTraining
-          ? "学習済みモデルでラインを計算中..."
-          : "Python計算を実行中 (predictのみ)...";
+        statusEl.textContent = "Python計算を実行中 (predictのみ)...";
         try {
           await pyodideReadyPromise;
           const axis = lineAxisSelect ? lineAxisSelect.value || "z" : "z";
@@ -710,6 +757,10 @@
       }
 
       async function trainCurrentDataset() {
+        if (datasetSource === "none") {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
+        }
         if (trainingPromise) {
           await trainingPromise;
           return trainCurrentDataset();
@@ -720,16 +771,16 @@
             buttonEl.disabled = true;
           }
           setAxisControlsDisabled(true);
-          const label = importedDataset ? importedDatasetName || "インポートデータ" : "ダミーデータ";
+          clearVisualizations();
+          const label = currentDatasetLabel();
           statusEl.textContent = `${label} を用いて学習中...`;
           try {
             await pyodideReadyPromise;
             await callWorker("fit", {
-              dataset: importedDataset ? importedDataset : null,
+              dataset: datasetSource === "custom" ? importedDataset : null,
             });
             sessionReady = true;
-            statusEl.textContent = `${label} の学習が完了しました。指定したラインでpredictを実行します。`;
-            await runLinePrediction({ fromTraining: true });
+            statusEl.textContent = `${label} の学習が完了しました。ラインを計算ボタンでpredictを実行してください。`;
           } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : String(error);
