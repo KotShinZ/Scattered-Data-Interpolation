@@ -677,6 +677,20 @@ class TrainedMethod:
 
 
 @dataclass
+class LineSliceResult:
+    method: str
+    smoothness_class: str
+    rmse: float
+    gradient_smoothness: float
+    laplacian_smoothness: float
+    varying_axis_label: str
+    varying_axis: str
+    axis_values: List[float]
+    predicted_values: List[float]
+    fixed_axes: List[Tuple[str, float]]
+
+
+@dataclass
 class ComparisonSession:
     dataset: List[Tuple[Point3D, float]]
     dataset_source: str
@@ -924,6 +938,38 @@ def serialize_results(results: List[EvaluationResult]) -> List[Dict[str, object]
     return payload
 
 
+def serialize_method_summaries(methods: Sequence[TrainedMethod]) -> List[Dict[str, object]]:
+    payload: List[Dict[str, object]] = []
+    for method in methods:
+        payload.append(
+            {
+                "method": method.method,
+                "smoothness_class": method.smoothness_class,
+                "rmse": method.rmse,
+                "gradient_smoothness": method.gradient_smoothness,
+                "laplacian_smoothness": method.laplacian_smoothness,
+            }
+        )
+    return payload
+
+
+def serialize_line_results(results: List[LineSliceResult]) -> List[Dict[str, object]]:
+    payload: List[Dict[str, object]] = []
+    for item in results:
+        payload.append(
+            {
+                "method": item.method,
+                "smoothness_class": item.smoothness_class,
+                "varying_axis": item.varying_axis.lower(),
+                "varying_axis_label": item.varying_axis_label,
+                "axis_values": item.axis_values[:],
+                "predicted_values": item.predicted_values[:],
+                "fixed_axes": [[label, value] for label, value in item.fixed_axes],
+            }
+        )
+    return payload
+
+
 def compute_prediction(
     session: ComparisonSession,
     slice_axis: str = "z",
@@ -994,6 +1040,79 @@ def compute_prediction(
         )
 
     return results, normalized_axis, resolved_slice_value
+
+
+def compute_line_predictions(
+    session: ComparisonSession,
+    varying_axis: str = "z",
+    fixed_values: Optional[Dict[str, float]] = None,
+) -> Tuple[List[LineSliceResult], str, Dict[str, float]]:
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    normalized_axis = (varying_axis or "z").lower()
+    varying_index = axis_lookup.get(normalized_axis, 2)
+
+    axis_values = session.grid_axes[varying_index][:]
+    if not axis_values:
+        lower, upper = session.axis_bounds[varying_index]
+        axis_values, _ = create_grid(session.grid_size, lower, upper)
+
+    normalized_fixed_input: Dict[str, float] = {}
+    if isinstance(fixed_values, dict):
+        for key, value in fixed_values.items():
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                normalized_fixed_input[key.lower()] = float(value)
+
+    resolved_fixed: Dict[str, float] = {}
+    coords_template = [0.0, 0.0, 0.0]
+    for axis_index, axis_label in enumerate(AXIS_LABELS):
+        label_lower = axis_label.lower()
+        if axis_index == varying_index:
+            continue
+        candidate = normalized_fixed_input.get(label_lower)
+        lower, upper = session.axis_bounds[axis_index]
+        min_bound = min(lower, upper)
+        max_bound = max(lower, upper)
+        if candidate is None:
+            axis_entries = session.grid_axes[axis_index]
+            if axis_entries:
+                candidate = axis_entries[len(axis_entries) // 2]
+            else:
+                candidate = (lower + upper) / 2.0
+        else:
+            candidate = max(min(candidate, max_bound), min_bound)
+        coords_template[axis_index] = candidate
+        resolved_fixed[label_lower] = candidate
+
+    results: List[LineSliceResult] = []
+    for method in session.methods:
+        predicted_values: List[float] = []
+        for axis_value in axis_values:
+            coords = coords_template[:]
+            coords[varying_index] = axis_value
+            predicted_values.append(method.interpolator.predict(tuple(coords)))
+
+        fixed_axes_info = [
+            (label, resolved_fixed[label.lower()])
+            for label in AXIS_LABELS
+            if label.lower() in resolved_fixed
+        ]
+
+        results.append(
+            LineSliceResult(
+                method=method.method,
+                smoothness_class=method.smoothness_class,
+                rmse=method.rmse,
+                gradient_smoothness=method.gradient_smoothness,
+                laplacian_smoothness=method.laplacian_smoothness,
+                varying_axis_label=AXIS_LABELS[varying_index],
+                varying_axis=AXIS_LABELS[varying_index],
+                axis_values=axis_values[:],
+                predicted_values=predicted_values,
+                fixed_axes=fixed_axes_info,
+            )
+        )
+
+    return results, normalized_axis, resolved_fixed
 
 
 def fit_session(
@@ -1075,6 +1194,37 @@ def predict_session(
         "dataset_source": active_session.dataset_source,
         "slice_axis": normalized_axis,
         "slice_value": resolved_value,
+    }
+
+
+def predict_line_session(
+    varying_axis: str = "z",
+    fixed_values: Optional[Dict[str, float]] = None,
+    *,
+    session: Optional[ComparisonSession] = None,
+) -> Dict[str, object]:
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    line_results, normalized_axis, resolved_fixed = compute_line_predictions(
+        active_session, varying_axis, fixed_values
+    )
+
+    dataset_payload = build_dataset_payload(
+        active_session.dataset,
+        active_session.dataset_source,
+        active_session.axis_bounds,
+    )
+
+    return {
+        "line_results": serialize_line_results(line_results),
+        "dataset": dataset_payload,
+        "dataset_source": active_session.dataset_source,
+        "skipped": active_session.skipped,
+        "line_axis": normalized_axis,
+        "fixed_axes": resolved_fixed,
+        "summaries": serialize_method_summaries(active_session.methods),
     }
 
 
