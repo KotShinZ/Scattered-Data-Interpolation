@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2軸固定ライン予測ビュー</title>
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js" defer></script>
     <style>
       :root {
@@ -220,7 +219,9 @@
       <div id="skipped" class="skipped" hidden></div>
     </section>
 
+    <script src="dataset-store.js"></script>
     <script>
+      const datasetStore = window.datasetStore || null;
       const statusEl = document.getElementById("status");
       const buttonEl = document.getElementById("run-button");
       const tableBody = document.querySelector("#results-table tbody");
@@ -248,6 +249,12 @@
       let sessionReady = false;
       let trainingPromise = null;
       let predicting = false;
+
+      const storedSelection = datasetStore ? datasetStore.load() : null;
+      if (storedSelection && storedSelection.dataset) {
+        importedDataset = storedSelection.dataset;
+        importedDatasetName = storedSelection.name || "インポートデータ";
+      }
 
       setAxisControlsDisabled(true);
 
@@ -410,28 +417,63 @@
       updateDatasetLabel();
       updateFixedControlsState();
 
-      const pyodideReadyPromise = (async () => {
-        statusEl.textContent = "Pyodideを読み込み中...";
-        const pyodide = await loadPyodide({
-          indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/",
+      const worker = new Worker("pyodide-worker.js");
+      let workerRequestId = 0;
+      const workerRequests = new Map();
+
+      function callWorker(type, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++workerRequestId;
+          workerRequests.set(id, { resolve, reject });
+          worker.postMessage({ id, type, payload });
         });
-        statusEl.textContent = "Pythonスクリプトを読み込み中...";
-        const response = await fetch("compare_interpolation.py");
-        if (!response.ok) {
-          throw new Error("compare_interpolation.py を取得できませんでした");
+      }
+
+      worker.addEventListener("message", (event) => {
+        const data = event.data || {};
+        if (data.type === "status" && data.message) {
+          statusEl.textContent = data.message;
+          return;
         }
-        const code = await response.text();
-        pyodide.FS.writeFile("compare_interpolation.py", code);
-        await pyodide.runPythonAsync("import compare_interpolation");
-        statusEl.textContent = "準備完了。データを学習しています...";
-        return pyodide;
-      })().catch((error) => {
-        statusEl.textContent = "初期化に失敗しました: " + error;
+        if (!data.id) {
+          return;
+        }
+        const entry = workerRequests.get(data.id);
+        if (!entry) {
+          return;
+        }
+        workerRequests.delete(data.id);
+        if (data.error) {
+          const error = new Error(data.error.message || "ワーカーエラーが発生しました");
+          if (data.error.stack) {
+            error.stack = data.error.stack;
+          }
+          entry.reject(error);
+        } else {
+          entry.resolve(data.result);
+        }
+      });
+
+      worker.addEventListener("error", (event) => {
+        console.error(event);
+        statusEl.textContent = "Pyodideワーカーでエラーが発生しました";
         if (buttonEl) {
           buttonEl.disabled = true;
         }
-        throw error;
       });
+
+      const pyodideReadyPromise = callWorker("init")
+        .then(() => {
+          statusEl.textContent = "準備完了。データを学習しています...";
+        })
+        .catch((error) => {
+          const message = error && error.message ? error.message : String(error);
+          statusEl.textContent = "初期化に失敗しました: " + message;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          throw error;
+        });
 
       pyodideReadyPromise
         .then(() => trainCurrentDataset())
@@ -444,6 +486,9 @@
           if (!file) {
             importedDataset = null;
             importedDatasetName = "";
+            if (datasetStore && typeof datasetStore.clear === "function") {
+              datasetStore.clear();
+            }
             updateDatasetLabel();
             statusEl.textContent = "ダミーデータを使用します。学習を実行します...";
             await trainCurrentDataset();
@@ -455,12 +500,21 @@
             const text = await file.text();
             importedDataset = parseCsvDataset(text);
             importedDatasetName = file.name;
+            if (datasetStore && typeof datasetStore.save === "function") {
+              datasetStore.save({
+                name: importedDatasetName,
+                dataset: importedDataset,
+              });
+            }
             updateDatasetLabel();
             statusEl.textContent = `${file.name} を読み込みました。学習を開始します...`;
             await trainCurrentDataset();
           } catch (error) {
             importedDataset = null;
             importedDatasetName = "";
+            if (datasetStore && typeof datasetStore.clear === "function") {
+              datasetStore.clear();
+            }
             updateDatasetLabel();
             const message = error instanceof Error ? error.message : String(error);
             statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
@@ -476,6 +530,9 @@
           importedDatasetName = "";
           if (fileInput) {
             fileInput.value = "";
+          }
+          if (datasetStore && typeof datasetStore.clear === "function") {
+            datasetStore.clear();
           }
           updateDatasetLabel();
           statusEl.textContent = "ダミーデータに戻しました。再学習を実行します...";
@@ -590,9 +647,8 @@
         statusEl.textContent = options.fromTraining
           ? "学習済みモデルでラインを計算中..."
           : "Python計算を実行中 (predictのみ)...";
-        let pyodide;
         try {
-          pyodide = await pyodideReadyPromise;
+          await pyodideReadyPromise;
           const axis = lineAxisSelect ? lineAxisSelect.value || "z" : "z";
           const fixedPayload = {};
           Object.entries(fixedInputs).forEach(([key, input]) => {
@@ -604,21 +660,10 @@
               fixedPayload[key] = parsed;
             }
           });
-          pyodide.globals.set("PY_LINE_AXIS", axis);
-          pyodide.globals.set("PY_FIXED_AXES", fixedPayload);
-          const pythonCode = `import json
-from compare_interpolation import predict_line_session
-line_axis = globals().get("PY_LINE_AXIS") or "z"
-fixed_candidate = globals().get("PY_FIXED_AXES")
-fixed_values = None
-if fixed_candidate is not None:
-    if hasattr(fixed_candidate, "to_py"):
-        fixed_candidate = fixed_candidate.to_py()
-    if isinstance(fixed_candidate, dict):
-        fixed_values = fixed_candidate
-json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_values), ensure_ascii=False)`;
-          const resultJson = await pyodide.runPythonAsync(pythonCode);
-          const result = JSON.parse(resultJson);
+          const result = await callWorker("predictLine", {
+            lineAxis: axis,
+            fixedValues: fixedPayload,
+          });
           latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
           latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];
           latestDataset = result.dataset || null;
@@ -653,13 +698,10 @@ json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_value
           }
         } catch (error) {
           console.error(error);
-          statusEl.textContent = "計算に失敗しました: " + error;
+          const message = error instanceof Error ? error.message : String(error);
+          statusEl.textContent = "ライン計算に失敗しました: " + message;
         } finally {
           predicting = false;
-          if (pyodide) {
-            pyodide.globals.set("PY_LINE_AXIS", null);
-            pyodide.globals.set("PY_FIXED_AXES", null);
-          }
           if (buttonEl) {
             buttonEl.disabled = !sessionReady;
           }
@@ -680,39 +722,33 @@ json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_value
           setAxisControlsDisabled(true);
           const label = importedDataset ? importedDatasetName || "インポートデータ" : "ダミーデータ";
           statusEl.textContent = `${label} を用いて学習中...`;
-          let pyodide;
           try {
-            pyodide = await pyodideReadyPromise;
-            pyodide.globals.set("PY_DATASET", importedDataset ? importedDataset : null);
-            await pyodide.runPythonAsync(`from compare_interpolation import fit_session, normalize_dataset
-dataset_candidate = globals().get("PY_DATASET")
-dataset_input = None
-if dataset_candidate is not None:
-    if hasattr(dataset_candidate, "to_py"):
-        dataset_candidate = dataset_candidate.to_py()
-    dataset_input = normalize_dataset(dataset_candidate)
-fit_session(dataset=dataset_input)
-`);
+            await pyodideReadyPromise;
+            await callWorker("fit", {
+              dataset: importedDataset ? importedDataset : null,
+            });
             sessionReady = true;
             statusEl.textContent = `${label} の学習が完了しました。指定したラインでpredictを実行します。`;
             await runLinePrediction({ fromTraining: true });
           } catch (error) {
             console.error(error);
-            statusEl.textContent = "学習に失敗しました: " + error;
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = "学習に失敗しました: " + message;
             sessionReady = false;
           } finally {
-            if (pyodide) {
-              pyodide.globals.set("PY_DATASET", null);
-            }
             if (!sessionReady && buttonEl) {
               buttonEl.disabled = true;
             }
+            if (sessionReady && buttonEl && !predicting) {
+              buttonEl.disabled = false;
+            }
+            setAxisControlsDisabled(!sessionReady);
             trainingPromise = null;
           }
         })();
         await trainingPromise;
-        return;
       }
+
 
       if (buttonEl) {
         buttonEl.addEventListener("click", () => runLinePrediction());
