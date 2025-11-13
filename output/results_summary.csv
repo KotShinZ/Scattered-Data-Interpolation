@@ -1,0 +1,15 @@
+Method,Smoothness,RMSE,GradientSmoothness,LaplacianSmoothness
+Nearest Neighbor,C0 (discontinuous),0.972136,1.725061,38.290546
+K-Neighbors (uniform),C0 (piecewise constant),0.858867,0.583396,12.225281
+Inverse Distance Weighting,C0 (weighted average),0.991102,0.314546,1.734249
+Linear (global regression),C1 (global polynomial),0.528793,9.585991,0.000000
+RBF (linear),C1+ (radial basis),0.947361,0.326342,1.347552
+RBF (cubic),C1+ (radial basis),1.316419,0.577644,1.418439
+RBF (quintic),C1+ (radial basis),0.276170,3.016389,8.670150
+RBF (gaussian),C1+ (radial basis),1.098596,0.528425,1.869357
+RBF (multiquadric),C1+ (radial basis),1.254756,0.606553,1.203130
+RBF (inverse_multiquadric),C1+ (radial basis),1.189928,0.517829,1.604506
+Thin-Plate Spline,C1 (thin-plate spline),2.065909,2.861582,5.493269
+Gaussian Process Regression,C2 (squared-exponential kernel),1.015994,0.541477,2.747626
+Ordinary Kriging,C1 (variogram-based),1.061669,0.348817,2.691951
+Universal Kriging,C1 (trend + variogram),0.529525,9.586268,0.086426
