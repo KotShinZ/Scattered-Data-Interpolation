@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3次元散布データ補間 手法比較</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js" defer></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+      :root {
+        --bg-start: #0f172a;
+        --bg-end: #1e2766;
+        --card-bg: rgba(255, 255, 255, 0.07);
+        --card-border: rgba(255, 255, 255, 0.2);
+        --text-main: #f5f7ff;
+        --text-muted: rgba(245, 247, 255, 0.8);
+        --accent: #6ee7b7;
+        --accent-strong: #34d399;
+        --shadow: 0 25px 80px rgba(10, 19, 43, 0.45);
+        --blur: blur(30px);
+        font-family: 'Inter', 'Hiragino Sans', 'Yu Gothic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+        color: var(--text-main);
+        padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      body::before,
+      body::after {
+        content: '';
+        position: fixed;
+        inset: auto auto 10% 60%;
+        width: 420px;
+        height: 420px;
+        background: radial-gradient(circle, rgba(110, 231, 183, 0.3), transparent 60%);
+        filter: var(--blur);
+        z-index: 0;
+        animation: pulse 16s ease-in-out infinite;
+      }
+
+      body::after {
+        inset: 5% auto auto 10%;
+        background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 60%);
+        animation-delay: -6s;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.2);
+        }
+      }
+
+      .app-shell {
+        position: relative;
+        z-index: 1;
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+      }
+
+      .hero-card {
+        background: radial-gradient(circle at top right, rgba(110, 231, 183, 0.2), transparent 45%),
+          var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 32px;
+        padding: clamp(1.5rem, 4vw, 2.75rem);
+        box-shadow: var(--shadow);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 2rem;
+        align-items: center;
+        animation: fadeIn 0.8s ease-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(30px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .hero-eyebrow {
+        font-size: 0.9rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 0.4rem;
+      }
+
+      h1 {
+        font-size: clamp(2rem, 4vw, 2.75rem);
+        margin: 0 0 0.5rem;
+      }
+
+      .hero-text p {
+        margin: 0.2rem 0 0;
+        color: var(--text-muted);
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+      }
+
+      button {
+        border: none;
+        border-radius: 999px;
+        padding: 0.9rem 1.8rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: linear-gradient(120deg, var(--accent), var(--accent-strong));
+        color: #042c1b;
+        box-shadow: 0 15px 40px rgba(52, 211, 153, 0.35);
+        transition: transform 150ms ease, box-shadow 150ms ease;
+      }
+
+      button:hover:not([disabled]) {
+        transform: translateY(-2px);
+        box-shadow: 0 20px 45px rgba(52, 211, 153, 0.45);
+      }
+
+      button[disabled] {
+        opacity: 0.6;
+        cursor: progress;
+        box-shadow: none;
+      }
+
+      #status {
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      .dashboard-grid {
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+
+      .panel {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 28px;
+        padding: 1.5rem;
+        backdrop-filter: blur(20px);
+        box-shadow: var(--shadow);
+        animation: fadeIn 0.9s ease-out;
+      }
+
+      .panel h2 {
+        margin-top: 0;
+        margin-bottom: 0.6rem;
+      }
+
+      .panel p {
+        margin-top: 0;
+        color: var(--text-muted);
+      }
+
+      .control-stack,
+      .plane-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+        align-items: center;
+      }
+
+      .control-stack label,
+      .plane-controls label {
+        font-weight: 600;
+        color: var(--text-main);
+      }
+
+      input[type='file'],
+      input[type='number'],
+      select {
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 0.65rem 0.9rem;
+        color: var(--text-main);
+        font-size: 1rem;
+        min-width: 140px;
+      }
+
+      input[type='number'] {
+        min-width: 110px;
+      }
+
+      input[type='file'] {
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      select:disabled,
+      input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      #dataset-label {
+        font-weight: 600;
+        display: inline-block;
+        margin-top: 0.4rem;
+      }
+
+      .hint-box {
+        margin-top: 0.8rem;
+        padding: 0.85rem 1rem;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .plane-options {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin-top: 0.75rem;
+      }
+
+      .plane-card {
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 20px;
+        padding: 0.75rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .plane-card span {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
+      .toggle-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: center;
+        margin-top: 0.75rem;
+      }
+
+      .toggle-row label {
+        display: inline-flex;
+        gap: 0.5rem;
+        align-items: center;
+        font-weight: 500;
+      }
+
+      input[type='checkbox'] {
+        width: 1.3rem;
+        height: 1.3rem;
+        accent-color: var(--accent-strong);
+      }
+
+      .results-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 20px;
+        overflow: hidden;
+      }
+
+      th,
+      td {
+        padding: 0.85rem;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font-variant-numeric: tabular-nums;
+      }
+
+      thead {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      #chart-container,
+      #plots-container {
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 24px;
+        padding: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        min-height: 120px;
+      }
+
+      #plots-container {
+        display: grid;
+        gap: 1.5rem;
+      }
+
+      @media (min-width: 960px) {
+        #plots-container {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .plot-card {
+        background: rgba(6, 13, 34, 0.65);
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+        animation: fadeIn 0.8s ease-out;
+      }
+
+      .plot-card h3 {
+        margin: 0;
+      }
+
+      .plot-container {
+        width: 100%;
+        height: 380px;
+        border-radius: 18px;
+        overflow: hidden;
+      }
+
+      .skipped {
+        background: rgba(255, 186, 8, 0.12);
+        border: 1px solid rgba(255, 186, 8, 0.4);
+        border-radius: 18px;
+        padding: 1rem;
+        color: #ffe8b6;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+
+      code {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero-card">
+        <div class="hero-text">
+          <p class="hero-eyebrow">Pyodide × Plotly Lab</p>
+          <h1>3次元散布データ補間ダッシュボード</h1>
+          <p>
+            ブラウザ上で Python を実行して補間手法を比較できます。
+            折れ線で確認したい場合は
+            <a href="line.html">ラインビュー</a>へどうぞ。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="run-button">結果を計算</button>
+          <p id="status">Pyodideを初期化中...</p>
+        </div>
+      </header>
+
+      <section class="dashboard-grid">
+        <article class="panel dataset-panel">
+          <h2>データソース</h2>
+          <p>
+            CSV のインポートやダミーデータの利用を切り替えて、読み込んだタイミングで学習を開始します。
+            保存済みデータはブラウザに保持され、各ビューで共有されます。
+          </p>
+          <div class="control-stack" id="dataset-controls">
+            <label for="csv-input">CSVをインポート:</label>
+            <input id="csv-input" type="file" accept=".csv,text/csv" />
+            <button id="reset-dataset" type="button">ダミーデータを使用</button>
+            <button id="use-saved-dataset" type="button" hidden>保存済みデータを読み込む</button>
+          </div>
+          <span id="dataset-label">現在: データ未読み込み</span>
+          <div class="hint-box">
+            CSV には <code>x,y,z,value</code> の 4 列を含めてください。データを読み込み学習が完了すると、「結果を計算」で predict のみが実行されます。
+          </div>
+        </article>
+
+        <article class="panel slice-panel">
+          <h2>平面スライス設定</h2>
+          <p>
+            固定する軸と値を選び、ブラウザでサーフェス表示時の描画オプションを調整します。
+          </p>
+          <div class="plane-options">
+            <label class="plane-card">
+              <span>固定する軸</span>
+              <select id="slice-axis">
+                <option value="x">X 軸</option>
+                <option value="y">Y 軸</option>
+                <option value="z" selected>Z 軸</option>
+              </select>
+            </label>
+            <label class="plane-card">
+              <span id="slice-value-label">固定値 (Z):</span>
+              <input id="slice-value" type="number" step="any" value="0.5" />
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>
+              <input id="surface-occlusion" type="checkbox" />
+              サーフェスで元データを隠す
+            </label>
+            <label>
+              元データの点サイズ
+              <input id="point-size" type="number" min="1" max="30" step="1" value="5" />
+            </label>
+          </div>
+          <div class="hint-box">
+            Python 側では常に 3 次元の補間器を学習し、指定した軸を固定した平面上で predict した結果だけを受け取り可視化しています。
+          </div>
+        </article>
+      </section>
+
+      <section class="panel results-panel">
+        <div>
+          <h2>評価指標</h2>
+          <p>
+            各手法ごとの RMSE と 1 次/2 次滑らかさをリアルタイムに算出し、チャートと 3D サーフェスを生成します。
+          </p>
+        </div>
+        <table id="results-table" aria-live="polite">
+          <thead>
+            <tr>
+              <th>手法</th>
+              <th>滑らかさクラス</th>
+              <th>RMSE</th>
+              <th>勾配滑らかさ</th>
+              <th>ラプラシアン滑らかさ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="5">結果はまだ計算されていません。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div id="chart-container" aria-live="polite">チャートは結果計算後に表示されます。</div>
+        <div id="plots-container" aria-live="polite">3Dグラフは結果計算後に表示されます。</div>
+        <div id="skipped" class="skipped" hidden></div>
+      </section>
+    </div>
+
+<script src="dataset-store.js"></script>
+    <script>
+      const datasetStore = window.datasetStore || null;
+      const statusEl = document.getElementById("status");
+      const buttonEl = document.getElementById("run-button");
+      const tableBody = document.querySelector("#results-table tbody");
+      const chartContainer = document.getElementById("chart-container");
+      const plotsContainer = document.getElementById("plots-container");
+      const skippedContainer = document.getElementById("skipped");
+      const sliceAxisSelect = document.getElementById("slice-axis");
+      const sliceValueInput = document.getElementById("slice-value");
+      const sliceValueLabel = document.getElementById("slice-value-label");
+      const surfaceOcclusionToggle = document.getElementById("surface-occlusion");
+      const pointSizeInput = document.getElementById("point-size");
+      const fileInput = document.getElementById("csv-input");
+      const resetDatasetButton = document.getElementById("reset-dataset");
+      const datasetLabel = document.getElementById("dataset-label");
+      const useSavedDatasetButton = document.getElementById("use-saved-dataset");
+
+      if (buttonEl) {
+        buttonEl.disabled = true;
+      }
+      setAxisControlsDisabled(true);
+
+      let latestResults = [];
+      let latestDataset = null;
+      let importedDataset = null;
+      let importedDatasetName = "";
+      const defaultPointSize = 5;
+      let latestOcclusionPreference = surfaceOcclusionToggle
+        ? Boolean(surfaceOcclusionToggle.checked)
+        : false;
+      let latestPointSize = defaultPointSize;
+      let sessionReady = false;
+      let trainingPromise = null;
+      let predicting = false;
+      let datasetSource = "none";
+
+      let storedSelection = datasetStore ? datasetStore.load() : null;
+
+      // storedSelection は localStorage に保存されたデータセット（任意）
+      // ページ表示時には自動で学習せず、明示的に読み込むボタンから利用する。
+
+      if (pointSizeInput) {
+        const parsed = Number.parseFloat(pointSizeInput.value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          latestPointSize = parsed;
+        } else {
+          pointSizeInput.value = String(defaultPointSize);
+        }
+      }
+
+      function updateSliceValueLabel() {
+        if (!sliceValueLabel || !sliceAxisSelect) {
+          return;
+        }
+        const axis = (sliceAxisSelect.value || "z").toUpperCase();
+        sliceValueLabel.textContent = `固定値 (${axis}):`;
+      }
+
+      function setAxisControlsDisabled(disabled) {
+        if (sliceAxisSelect) {
+          sliceAxisSelect.disabled = disabled;
+        }
+        if (sliceValueInput) {
+          sliceValueInput.disabled = disabled;
+        }
+      }
+
+      function currentDatasetLabel() {
+        if (datasetSource === "custom") {
+          return importedDatasetName || "インポートデータ";
+        }
+        if (datasetSource === "dummy") {
+          return "ダミーデータ";
+        }
+        return "データ未読み込み";
+      }
+
+      function updateDatasetLabel() {
+        if (!datasetLabel) {
+          return;
+        }
+        if (datasetSource === "custom") {
+          datasetLabel.textContent = `現在: ${
+            importedDatasetName || "インポートデータ"
+          } を使用`;
+        } else if (datasetSource === "dummy") {
+          datasetLabel.textContent = "現在: ダミーデータを使用";
+        } else {
+          datasetLabel.textContent = "現在: データ未読み込み";
+        }
+      }
+
+      function refreshStoredDatasetButton() {
+        if (!useSavedDatasetButton) {
+          return;
+        }
+        const hasStored = storedSelection && storedSelection.dataset;
+        useSavedDatasetButton.hidden = !hasStored;
+        if (hasStored) {
+          const label = storedSelection.name || "インポートデータ";
+          useSavedDatasetButton.textContent = `${label} を読み込む`;
+        }
+      }
+
+      function clearVisualizations() {
+        latestResults = [];
+        latestDataset = null;
+        renderTableRows([]);
+        if (chartContainer) {
+          chartContainer.textContent = "チャートは結果計算後に表示されます。";
+        }
+        if (plotsContainer) {
+          plotsContainer.textContent = "3Dグラフは結果計算後に表示されます。";
+        }
+        if (skippedContainer) {
+          skippedContainer.hidden = true;
+          skippedContainer.textContent = "";
+        }
+      }
+
+      function parseCsvDataset(text) {
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+        if (!lines.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        let startIndex = 0;
+        let columnOrder = [0, 1, 2, 3];
+        const firstCells = lines[0].split(",").map((cell) => cell.trim());
+        const lowerHeader = firstCells.map((cell) => cell.toLowerCase());
+        const hasHeader =
+          lowerHeader.includes("x") ||
+          lowerHeader.includes("y") ||
+          lowerHeader.includes("z") ||
+          lowerHeader.includes("value");
+
+        if (hasHeader) {
+          const required = ["x", "y", "z", "value"];
+          columnOrder = required.map((key) => {
+            const index = lowerHeader.indexOf(key);
+            if (index === -1) {
+              throw new Error("ヘッダーには x, y, z, value の列が必要です。");
+            }
+            return index;
+          });
+          startIndex = 1;
+        } else if (firstCells.length < 4) {
+          throw new Error("各行には少なくとも4列の数値が必要です。");
+        }
+
+        const points = [];
+        const values = [];
+        for (let rowIndex = startIndex; rowIndex < lines.length; rowIndex += 1) {
+          const row = lines[rowIndex];
+          if (!row) {
+            continue;
+          }
+          const cells = row.split(",").map((cell) => cell.trim());
+          if (cells.length < 4) {
+            throw new Error(`行 ${rowIndex + 1} に十分な列がありません。`);
+          }
+          const pick = (index) => {
+            if (index >= cells.length) {
+              throw new Error(`行 ${rowIndex + 1} の列数が足りません。`);
+            }
+            return cells[index];
+          };
+          const x = Number(pick(columnOrder[0]));
+          const y = Number(pick(columnOrder[1]));
+          const z = Number(pick(columnOrder[2]));
+          const value = Number(pick(columnOrder[3]));
+          if (
+            !Number.isFinite(x) ||
+            !Number.isFinite(y) ||
+            !Number.isFinite(z) ||
+            !Number.isFinite(value)
+          ) {
+            throw new Error(`行 ${rowIndex + 1} に数値以外の値が含まれています。`);
+          }
+          points.push([x, y, z]);
+          values.push(value);
+        }
+
+        if (!points.length) {
+          throw new Error("CSVに有効なデータ行がありません。");
+        }
+
+        return { points, values };
+      }
+
+      refreshStoredDatasetButton();
+      updateDatasetLabel();
+      updateSliceValueLabel();
+      clearVisualizations();
+
+      const worker = new Worker("pyodide-worker.js");
+      let workerRequestId = 0;
+      const workerRequests = new Map();
+
+      function callWorker(type, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++workerRequestId;
+          workerRequests.set(id, { resolve, reject });
+          worker.postMessage({ id, type, payload });
+        });
+      }
+
+      worker.addEventListener("message", (event) => {
+        const data = event.data || {};
+        if (data.type === "status" && data.message) {
+          statusEl.textContent = data.message;
+          return;
+        }
+        if (!data.id) {
+          return;
+        }
+        const entry = workerRequests.get(data.id);
+        if (!entry) {
+          return;
+        }
+        workerRequests.delete(data.id);
+        if (data.error) {
+          const error = new Error(data.error.message || "ワーカーエラーが発生しました");
+          if (data.error.stack) {
+            error.stack = data.error.stack;
+          }
+          entry.reject(error);
+        } else {
+          entry.resolve(data.result);
+        }
+      });
+
+      worker.addEventListener("error", (event) => {
+        console.error(event);
+        statusEl.textContent = "Pyodideワーカーでエラーが発生しました";
+        if (buttonEl) {
+          buttonEl.disabled = true;
+        }
+      });
+
+      const pyodideReadyPromise = callWorker("init")
+        .then(() => {
+          statusEl.textContent = "準備完了。まずデータを読み込んで学習してください。";
+        })
+        .catch((error) => {
+          const message = error && error.message ? error.message : String(error);
+          statusEl.textContent = "初期化に失敗しました: " + message;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          throw error;
+        });
+
+      if (fileInput) {
+        fileInput.addEventListener("change", async (event) => {
+          const target = event.target;
+          const file = target && target.files ? target.files[0] : null;
+          if (!file) {
+            statusEl.textContent = "ファイルが選択されていません。";
+            return;
+          }
+
+          statusEl.textContent = `${file.name} を読み込み中...`;
+          try {
+            const text = await file.text();
+            const parsedDataset = parseCsvDataset(text);
+            importedDataset = parsedDataset;
+            importedDatasetName = file.name;
+            datasetSource = "custom";
+            if (datasetStore && typeof datasetStore.save === "function") {
+              datasetStore.save({
+                name: importedDatasetName,
+                dataset: importedDataset,
+              });
+            }
+            storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+            refreshStoredDatasetButton();
+            updateDatasetLabel();
+            statusEl.textContent = `${file.name} を読み込みました。学習を開始します...`;
+            await trainCurrentDataset();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = `CSVの読み込みに失敗しました: ${message}`;
+            if (target) {
+              target.value = "";
+            }
+          }
+        });
+      }
+
+      if (useSavedDatasetButton) {
+        useSavedDatasetButton.addEventListener("click", async () => {
+          storedSelection = datasetStore ? datasetStore.load() : storedSelection;
+          if (!storedSelection || !storedSelection.dataset) {
+            refreshStoredDatasetButton();
+            statusEl.textContent = "保存済みデータはありません。";
+            return;
+          }
+          importedDataset = storedSelection.dataset;
+          importedDatasetName = storedSelection.name || "インポートデータ";
+          datasetSource = "custom";
+          updateDatasetLabel();
+          statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
+          await trainCurrentDataset();
+        });
+      }
+
+      if (resetDatasetButton) {
+        resetDatasetButton.addEventListener("click", async () => {
+          importedDataset = null;
+          importedDatasetName = "";
+          datasetSource = "dummy";
+          if (fileInput) {
+            fileInput.value = "";
+          }
+          if (datasetStore && typeof datasetStore.clear === "function") {
+            datasetStore.clear();
+          }
+          storedSelection = null;
+          refreshStoredDatasetButton();
+          updateDatasetLabel();
+          statusEl.textContent = "ダミーデータを読み込みました。学習を実行します...";
+          await trainCurrentDataset();
+        });
+      }
+
+      function formatNumber(value) {
+        return Number(value).toFixed(4);
+      }
+
+      function renderTableRows(results) {
+        tableBody.innerHTML = "";
+        if (!results.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 5;
+          cell.textContent = "有効な結果がありません。";
+          row.appendChild(cell);
+          tableBody.appendChild(row);
+          return;
+        }
+        for (const item of results) {
+          const row = document.createElement("tr");
+          const columns = [
+            item.method,
+            item.smoothness_class,
+            formatNumber(item.rmse),
+            formatNumber(item.gradient_smoothness),
+            formatNumber(item.laplacian_smoothness),
+          ];
+          for (const value of columns) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          tableBody.appendChild(row);
+        }
+      }
+
+      function projectDataset(dataset, sliceAxis) {
+        const axisIndex = { x: 0, y: 1, z: 2 };
+        const dropIndex = axisIndex[sliceAxis] ?? 2;
+        const keepIndices = [0, 1, 2].filter((idx) => idx !== dropIndex);
+        const axis1Index = keepIndices[0];
+        const axis2Index = keepIndices[1];
+        const normalize = (value) => Number.parseFloat(Number(value).toFixed(6));
+
+        const projected = { x: [], y: [], z: [] };
+        if (!dataset || !Array.isArray(dataset.points) || !Array.isArray(dataset.values)) {
+          return projected;
+        }
+
+        dataset.points.forEach((point, idx) => {
+          if (!Array.isArray(point) || point.length < 3) {
+            return;
+          }
+          const value = Number(dataset.values[idx]);
+          if (!Number.isFinite(value)) {
+            return;
+          }
+          projected.x.push(normalize(point[axis1Index]));
+          projected.y.push(normalize(point[axis2Index]));
+          projected.z.push(value);
+        });
+        return projected;
+      }
+
+      function render3DPlots(results, dataset) {
+        if (typeof Plotly === "undefined") {
+          plotsContainer.textContent = "Plotly の読み込みに失敗しました。ページを再読み込みしてください。";
+          return;
+        }
+
+        plotsContainer.innerHTML = "";
+        if (!results.length) {
+          plotsContainer.textContent = "表示できる結果がありません。";
+          return;
+        }
+
+        const occlusionEnabled = surfaceOcclusionToggle
+          ? Boolean(surfaceOcclusionToggle.checked)
+          : false;
+        let markerSize = latestPointSize;
+        if (!Number.isFinite(markerSize) || markerSize <= 0) {
+          markerSize = defaultPointSize;
+        }
+        if (pointSizeInput) {
+          const parsed = Number.parseFloat(pointSizeInput.value);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            markerSize = parsed;
+          }
+        }
+        latestPointSize = markerSize;
+
+        const firstSlice = results[0]?.slice;
+        const sliceAxis = firstSlice?.axis || "z";
+        const projected = projectDataset(dataset, sliceAxis);
+        const axisBounds = Array.isArray(dataset?.axis_bounds)
+          ? dataset.axis_bounds
+          : null;
+        const axisIndexLookup = { X: 0, Y: 1, Z: 2 };
+
+        results.forEach((item, index) => {
+          const slice = item.slice;
+
+          const card = document.createElement("section");
+          card.className = "plot-card";
+
+          const heading = document.createElement("h3");
+          heading.textContent = `${item.method} (${item.smoothness_class})`;
+          card.appendChild(heading);
+
+          if (
+            !slice ||
+            !Array.isArray(slice.axis1_values) ||
+            !Array.isArray(slice.axis2_values) ||
+            !Array.isArray(slice.matrix)
+          ) {
+            const message = document.createElement("p");
+            message.style.margin = "0";
+            message.textContent = "固定平面での補間サーフェスを生成できませんでした。";
+            card.appendChild(message);
+            plotsContainer.appendChild(card);
+            return;
+          }
+
+          const caption = document.createElement("p");
+          caption.style.margin = "0";
+          caption.textContent = `${(slice.axis_label || sliceAxis).toUpperCase()} = ${formatNumber(
+            slice.value
+          )} における ${slice.axis1_label}-${slice.axis2_label} 平面の補間結果です。`;
+          card.appendChild(caption);
+
+          const plotDiv = document.createElement("div");
+          plotDiv.className = "plot-container";
+          plotDiv.id = `plot-${index}`;
+          card.appendChild(plotDiv);
+
+          plotsContainer.appendChild(card);
+
+          const axis1Values = slice.axis1_values.map((value) => Number(value));
+          const axis2Values = slice.axis2_values.map((value) => Number(value));
+          const zMatrix = slice.matrix.map((row) => row.map((value) => Number(value)));
+
+          const xGrid = axis2Values.map(() => axis1Values.slice());
+          const yGrid = axis2Values.map((axis2) =>
+            Array(axis1Values.length).fill(axis2)
+          );
+
+          const axis1RangeIndex = axisIndexLookup[slice.axis1_label?.toUpperCase?.() || ""];
+          const axis2RangeIndex = axisIndexLookup[slice.axis2_label?.toUpperCase?.() || ""];
+          const axis1Range =
+            axisBounds && Number.isInteger(axis1RangeIndex)
+              ? axisBounds[axis1RangeIndex]
+              : null;
+          const axis2Range =
+            axisBounds && Number.isInteger(axis2RangeIndex)
+              ? axisBounds[axis2RangeIndex]
+              : null;
+
+          const surfaceTrace = {
+            type: "surface",
+            x: xGrid,
+            y: yGrid,
+            z: zMatrix,
+            colorscale: "Turbo",
+            opacity: occlusionEnabled ? 1 : 0.85,
+            name: "補間サーフェス",
+            showscale: false,
+          };
+
+          const datasetTrace = {
+            type: "scatter3d",
+            mode: "markers",
+            x: projected.x,
+            y: projected.y,
+            z: projected.z,
+            marker: {
+              size: markerSize,
+              color: "#ff4081",
+              opacity: occlusionEnabled ? 1 : 0.9,
+            },
+            name: "元データ",
+            hovertemplate: "(%{x}, %{y}, %{z})<extra>元データ</extra>",
+          };
+
+          const layout = {
+            margin: { l: 0, r: 0, t: 0, b: 0 },
+            scene: {
+              xaxis: {
+                title: slice.axis1_label,
+                range: axis1Range ? [axis1Range[0], axis1Range[1]] : undefined,
+              },
+              yaxis: {
+                title: slice.axis2_label,
+                range: axis2Range ? [axis2Range[0], axis2Range[1]] : undefined,
+              },
+              zaxis: { title: "Value" },
+              bgcolor: "#f8f9fa",
+            },
+            legend: { orientation: "h" },
+          };
+
+          const traces = occlusionEnabled
+            ? [surfaceTrace, datasetTrace]
+            : [datasetTrace, surfaceTrace];
+
+          Plotly.newPlot(plotDiv, traces, layout, {
+            responsive: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ["toImage"],
+          });
+        });
+      }
+      async function runPredictionOnly() {
+        if (predicting) {
+          return;
+        }
+        if (!sessionReady) {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
+        }
+        predicting = true;
+        if (buttonEl) {
+          buttonEl.disabled = true;
+        }
+        setAxisControlsDisabled(true);
+        statusEl.textContent = "Python計算を実行中 (predictのみ)...";
+        try {
+          await pyodideReadyPromise;
+          const chosenAxis = sliceAxisSelect ? sliceAxisSelect.value || "z" : "z";
+          const rawValue = sliceValueInput ? Number.parseFloat(sliceValueInput.value) : NaN;
+          const sliceValue = Number.isFinite(rawValue) ? rawValue : null;
+          const result = await callWorker("predictPlane", {
+            sliceAxis: chosenAxis,
+            sliceValue,
+          });
+          latestResults = Array.isArray(result.results) ? result.results : [];
+          latestDataset = result.dataset || null;
+          latestOcclusionPreference = surfaceOcclusionToggle
+            ? Boolean(surfaceOcclusionToggle.checked)
+            : false;
+          renderTableRows(latestResults);
+          chartContainer.innerHTML = result.svg || "チャートを生成できませんでした。";
+          if (latestDataset && latestResults.length) {
+            render3DPlots(latestResults, latestDataset);
+          } else {
+            plotsContainer.textContent = "3Dグラフを生成できませんでした。";
+          }
+          if (sliceAxisSelect) {
+            const axisFromResult = result.slice_axis || chosenAxis;
+            sliceAxisSelect.value = axisFromResult;
+          }
+          if (sliceValueInput) {
+            const valueFromResult = Number(result.slice_value);
+            if (Number.isFinite(valueFromResult)) {
+              sliceValueInput.value = String(valueFromResult);
+            }
+          }
+          updateSliceValueLabel();
+          if (result.skipped && result.skipped.length) {
+            skippedContainer.hidden = false;
+            skippedContainer.innerHTML =
+              "<strong>スキップされた手法:</strong><ul>" +
+              result.skipped
+                .map((item) => `<li><code>${item[0]}</code>: ${item[1]}</li>`)
+                .join("") +
+              "</ul>";
+          } else {
+            skippedContainer.hidden = true;
+            skippedContainer.textContent = "";
+          }
+          const datasetSource = result.dataset_source || (result.dataset && result.dataset.source);
+          if (datasetSource === "custom") {
+            const label = importedDatasetName || "インポートデータ";
+            statusEl.textContent = `${label} でpredictが完了しました。`;
+          } else {
+            statusEl.textContent = "ダミーデータでpredictが完了しました。";
+          }
+        } catch (error) {
+          console.error(error);
+          const message = error instanceof Error ? error.message : String(error);
+          statusEl.textContent = "計算に失敗しました: " + message;
+        } finally {
+          predicting = false;
+          if (buttonEl) {
+            buttonEl.disabled = !sessionReady;
+          }
+          setAxisControlsDisabled(!sessionReady);
+        }
+      }
+
+      async function trainCurrentDataset() {
+        if (datasetSource === "none") {
+          statusEl.textContent = "先にデータを読み込んでください。";
+          return;
+        }
+        if (trainingPromise) {
+          await trainingPromise;
+          return trainCurrentDataset();
+        }
+        trainingPromise = (async () => {
+          sessionReady = false;
+          if (buttonEl) {
+            buttonEl.disabled = true;
+          }
+          setAxisControlsDisabled(true);
+          clearVisualizations();
+          const label = currentDatasetLabel();
+          statusEl.textContent = `${label} を用いて学習中...`;
+          try {
+            await pyodideReadyPromise;
+            await callWorker("fit", {
+              dataset: datasetSource === "custom" ? importedDataset : null,
+            });
+            sessionReady = true;
+            statusEl.textContent = `${label} の学習が完了しました。結果を計算ボタンでpredictを実行してください。`;
+          } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = "学習に失敗しました: " + message;
+            sessionReady = false;
+          } finally {
+            if (!sessionReady && buttonEl) {
+              buttonEl.disabled = true;
+            }
+            if (sessionReady && buttonEl && !predicting) {
+              buttonEl.disabled = false;
+            }
+            setAxisControlsDisabled(!sessionReady);
+            trainingPromise = null;
+          }
+        })();
+        await trainingPromise;
+      }
+
+
+      buttonEl.addEventListener("click", runPredictionOnly);
+      if (sliceAxisSelect) {
+        sliceAxisSelect.addEventListener("change", updateSliceValueLabel);
+      }
+      if (surfaceOcclusionToggle) {
+        surfaceOcclusionToggle.addEventListener("change", () => {
+          if (!latestResults.length || !latestDataset) {
+            return;
+          }
+          if (surfaceOcclusionToggle.checked !== latestOcclusionPreference) {
+            latestOcclusionPreference = surfaceOcclusionToggle.checked;
+            render3DPlots(latestResults, latestDataset);
+          }
+        });
+      }
+      if (pointSizeInput) {
+        const handlePointSizeChange = () => {
+          if (!pointSizeInput) {
+            return;
+          }
+          let parsed = Number.parseFloat(pointSizeInput.value);
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            parsed = defaultPointSize;
+            pointSizeInput.value = String(defaultPointSize);
+          }
+          latestPointSize = parsed;
+          if (!latestResults.length || !latestDataset) {
+            return;
+          }
+          render3DPlots(latestResults, latestDataset);
+        };
+        pointSizeInput.addEventListener("input", handlePointSizeChange);
+        pointSizeInput.addEventListener("change", handlePointSizeChange);
+      }
+    </script>
+  </body>
+</html>
