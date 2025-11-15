@@ -9,18 +9,18 @@
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
       :root {
-        --bg-start: #0f172a;
-        --bg-end: #1e2766;
-        --card-bg: rgba(255, 255, 255, 0.07);
-        --card-border: rgba(255, 255, 255, 0.2);
-        --text-main: #f5f7ff;
-        --text-muted: rgba(245, 247, 255, 0.8);
-        --accent: #6ee7b7;
-        --accent-strong: #34d399;
-        --shadow: 0 25px 80px rgba(10, 19, 43, 0.45);
-        --blur: blur(30px);
+        --bg-start: #fdfdfd;
+        --bg-end: #f0f4ff;
+        --card-bg: rgba(255, 255, 255, 0.9);
+        --card-border: rgba(15, 23, 42, 0.08);
+        --text-main: #0f172a;
+        --text-muted: rgba(15, 23, 42, 0.75);
+        --accent: #2563eb;
+        --accent-strong: #7c3aed;
+        --shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+        --blur: blur(50px);
         font-family: 'Inter', 'Hiragino Sans', 'Yu Gothic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        color-scheme: dark;
+        color-scheme: light;
       }
 
       * {
@@ -30,7 +30,8 @@
       body {
         margin: 0;
         min-height: 100vh;
-        background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+        background: radial-gradient(circle at top, #eef2ff, transparent 55%),
+          linear-gradient(135deg, var(--bg-start), var(--bg-end));
         color: var(--text-main);
         padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
         position: relative;
@@ -44,25 +45,25 @@
         inset: auto auto 10% 60%;
         width: 420px;
         height: 420px;
-        background: radial-gradient(circle, rgba(110, 231, 183, 0.3), transparent 60%);
+        background: radial-gradient(circle, rgba(96, 165, 250, 0.35), transparent 70%);
         filter: var(--blur);
         z-index: 0;
-        animation: pulse 16s ease-in-out infinite;
+        animation: float 24s ease-in-out infinite;
       }
 
       body::after {
         inset: 5% auto auto 10%;
-        background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 60%);
-        animation-delay: -6s;
+        background: radial-gradient(circle, rgba(248, 113, 113, 0.3), transparent 70%);
+        animation-delay: -10s;
       }
 
-      @keyframes pulse {
+      @keyframes float {
         0%,
         100% {
-          transform: scale(1);
+          transform: translate3d(0, 0, 0) scale(1);
         }
         50% {
-          transform: scale(1.2);
+          transform: translate3d(10px, -10px, 0) scale(1.05);
         }
       }
 
@@ -77,7 +78,7 @@
       }
 
       .hero-card {
-        background: radial-gradient(circle at top right, rgba(110, 231, 183, 0.2), transparent 45%),
+        background: radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 45%),
           var(--card-bg);
         border: 1px solid var(--card-border);
         border-radius: 32px;
@@ -133,15 +134,15 @@
         font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
-        background: linear-gradient(120deg, var(--accent), var(--accent-strong));
-        color: #042c1b;
-        box-shadow: 0 15px 40px rgba(52, 211, 153, 0.35);
+        background: linear-gradient(120deg, #2563eb, #7c3aed);
+        color: #fff;
+        box-shadow: 0 15px 40px rgba(124, 58, 237, 0.25);
         transition: transform 150ms ease, box-shadow 150ms ease;
       }
 
       button:hover:not([disabled]) {
         transform: translateY(-2px);
-        box-shadow: 0 20px 45px rgba(52, 211, 153, 0.45);
+        box-shadow: 0 20px 45px rgba(37, 99, 235, 0.35);
       }
 
       button[disabled] {
@@ -181,6 +182,26 @@
         color: var(--text-muted);
       }
 
+      .plot-card h3,
+      .plot-title-button {
+        margin: 0 0 0.35rem;
+        cursor: pointer;
+        transition: color 0.2s ease, transform 0.2s ease;
+      }
+
+      .plot-card h3:focus-visible,
+      .plot-card h3:hover,
+      .plot-title-button:focus-visible,
+      .plot-title-button:hover {
+        color: var(--accent);
+        outline: none;
+        transform: translateY(-1px);
+      }
+
+      .plot-card h3 {
+        font-size: 1.1rem;
+      }
+
       .control-stack,
       .plane-controls {
         display: flex;
@@ -198,8 +219,8 @@
       input[type='file'],
       input[type='number'],
       select {
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(15, 23, 42, 0.04);
+        border: 1px solid rgba(15, 23, 42, 0.15);
         border-radius: 12px;
         padding: 0.65rem 0.9rem;
         color: var(--text-main);
@@ -213,7 +234,7 @@
 
       input[type='file'] {
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(37, 99, 235, 0.08);
       }
 
       select:disabled,
@@ -232,7 +253,7 @@
         margin-top: 0.8rem;
         padding: 0.85rem 1rem;
         border-radius: 18px;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(226, 232, 240, 0.7);
         color: var(--text-muted);
         font-size: 0.95rem;
       }
@@ -245,13 +266,14 @@
       }
 
       .plane-card {
-        background: rgba(0, 0, 0, 0.25);
+        background: rgba(255, 255, 255, 0.85);
         border-radius: 20px;
         padding: 0.75rem 1rem;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+        box-shadow: 0 12px 25px rgba(15, 23, 42, 0.08);
       }
 
       .plane-card span {
@@ -289,21 +311,22 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        background: rgba(0, 0, 0, 0.25);
+        background: rgba(255, 255, 255, 0.9);
         border-radius: 20px;
         overflow: hidden;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
       }
 
       th,
       td {
         padding: 0.85rem;
         text-align: center;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
         font-variant-numeric: tabular-nums;
       }
 
       thead {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(99, 102, 241, 0.08);
       }
 
       tbody tr:last-child td {
@@ -312,11 +335,12 @@
 
       #chart-container,
       #plots-container {
-        background: rgba(0, 0, 0, 0.25);
+        background: rgba(255, 255, 255, 0.92);
         border-radius: 24px;
         padding: 1rem;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         min-height: 120px;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
       }
 
       #plots-container {
@@ -331,14 +355,14 @@
       }
 
       .plot-card {
-        background: rgba(6, 13, 34, 0.65);
+        background: rgba(249, 250, 255, 0.95);
         border-radius: 22px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         padding: 1rem;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
-        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 15px 35px rgba(15, 23, 42, 0.12);
         animation: fadeIn 0.8s ease-out;
       }
 
@@ -354,11 +378,12 @@
       }
 
       .skipped {
-        background: rgba(255, 186, 8, 0.12);
-        border: 1px solid rgba(255, 186, 8, 0.4);
+        background: rgba(250, 204, 21, 0.18);
+        border: 1px solid rgba(250, 204, 21, 0.4);
         border-radius: 18px;
         padding: 1rem;
-        color: #ffe8b6;
+        color: #92400e;
+        font-weight: 600;
       }
 
       a {
@@ -368,6 +393,101 @@
 
       code {
         font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.4);
+        backdrop-filter: blur(6px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        z-index: 20;
+      }
+
+      .modal-backdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .modal-window {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        z-index: 30;
+      }
+
+      .modal-window.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .modal-content {
+        width: min(1100px, 95vw);
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        background: #fff;
+        border-radius: 32px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        padding: 1.5rem;
+        box-shadow: 0 30px 90px rgba(15, 23, 42, 0.3);
+        overflow: hidden;
+      }
+
+      .modal-content header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .modal-content h3 {
+        margin: 0;
+        font-size: 1.4rem;
+      }
+
+      .modal-close {
+        border: none;
+        border-radius: 999px;
+        padding: 0.5rem 1rem;
+        background: rgba(15, 23, 42, 0.08);
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .modal-range-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+      }
+
+      .modal-range-grid label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .modal-range-grid input {
+        padding: 0.6rem 0.8rem;
+        border-radius: 0.8rem;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        font-size: 0.95rem;
+      }
+
+      .modal-plot {
+        flex: 1;
+        min-height: 420px;
       }
     </style>
   </head>
@@ -472,7 +592,36 @@
       </section>
     </div>
 
-<script src="dataset-store.js"></script>
+    <div class="modal-backdrop" id="plane-modal-backdrop"></div>
+    <div class="modal-window" id="plane-modal" aria-hidden="true">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="plane-modal-title">
+        <header>
+          <h3 id="plane-modal-title">拡大表示</h3>
+          <button type="button" class="modal-close" id="plane-modal-close">閉じる</button>
+        </header>
+        <div class="modal-range-grid" aria-live="polite">
+          <label>
+            <span id="plane-modal-axis1-label-min">横軸 最小</span>
+            <input type="number" id="plane-modal-axis1-min" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="plane-modal-axis1-label-max">横軸 最大</span>
+            <input type="number" id="plane-modal-axis1-max" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="plane-modal-axis2-label-min">縦軸 最小</span>
+            <input type="number" id="plane-modal-axis2-min" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="plane-modal-axis2-label-max">縦軸 最大</span>
+            <input type="number" id="plane-modal-axis2-max" step="any" placeholder="自動" />
+          </label>
+        </div>
+        <div id="plane-modal-plot" class="modal-plot"></div>
+      </div>
+    </div>
+
+    <script src="dataset-store.js"></script>
     <script>
       const datasetStore = window.datasetStore || null;
       const statusEl = document.getElementById("status");
@@ -490,6 +639,19 @@
       const resetDatasetButton = document.getElementById("reset-dataset");
       const datasetLabel = document.getElementById("dataset-label");
       const useSavedDatasetButton = document.getElementById("use-saved-dataset");
+      const planeModalBackdrop = document.getElementById("plane-modal-backdrop");
+      const planeModalEl = document.getElementById("plane-modal");
+      const planeModalPlotEl = document.getElementById("plane-modal-plot");
+      const planeModalTitleEl = document.getElementById("plane-modal-title");
+      const planeModalCloseButton = document.getElementById("plane-modal-close");
+      const planeModalAxis1LabelMin = document.getElementById("plane-modal-axis1-label-min");
+      const planeModalAxis1LabelMax = document.getElementById("plane-modal-axis1-label-max");
+      const planeModalAxis2LabelMin = document.getElementById("plane-modal-axis2-label-min");
+      const planeModalAxis2LabelMax = document.getElementById("plane-modal-axis2-label-max");
+      const planeModalAxis1Min = document.getElementById("plane-modal-axis1-min");
+      const planeModalAxis1Max = document.getElementById("plane-modal-axis1-max");
+      const planeModalAxis2Min = document.getElementById("plane-modal-axis2-min");
+      const planeModalAxis2Max = document.getElementById("plane-modal-axis2-max");
 
       if (buttonEl) {
         buttonEl.disabled = true;
@@ -511,6 +673,8 @@
       let datasetSource = "none";
 
       let storedSelection = datasetStore ? datasetStore.load() : null;
+
+      const axisIndexLookup = { X: 0, Y: 1, Z: 2 };
 
       // storedSelection は localStorage に保存されたデータセット（任意）
       // ページ表示時には自動で学習せず、明示的に読み込むボタンから利用する。
@@ -864,6 +1028,260 @@
         return projected;
       }
 
+      function cloneTraces(traces) {
+        if (!Array.isArray(traces)) {
+          return [];
+        }
+        return traces.map((trace) => JSON.parse(JSON.stringify(trace)));
+      }
+
+      function computeRangeFromValues(values) {
+        if (!Array.isArray(values) || !values.length) {
+          return null;
+        }
+        const finiteValues = values
+          .map((value) => Number.parseFloat(value))
+          .filter((value) => Number.isFinite(value));
+        if (!finiteValues.length) {
+          return null;
+        }
+        const min = Math.min(...finiteValues);
+        const max = Math.max(...finiteValues);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+          return null;
+        }
+        return [min, max];
+      }
+
+      function sanitizeRange(range) {
+        if (!Array.isArray(range) || range.length < 2) {
+          return null;
+        }
+        const min = Number(range[0]);
+        const max = Number(range[1]);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+          return null;
+        }
+        return min < max ? [min, max] : [max, min];
+      }
+
+      function buildPlanePlotPayload(options) {
+        const { slice, projected, axisBounds, occlusionEnabled, markerSize } = options || {};
+        if (
+          !slice ||
+          !Array.isArray(slice.axis1_values) ||
+          !Array.isArray(slice.axis2_values) ||
+          !Array.isArray(slice.matrix)
+        ) {
+          return null;
+        }
+        const axis1Values = slice.axis1_values.map((value) => Number(value));
+        const axis2Values = slice.axis2_values.map((value) => Number(value));
+        const zMatrix = slice.matrix.map((row) => row.map((value) => Number(value)));
+        const xGrid = axis2Values.map(() => axis1Values.slice());
+        const yGrid = axis2Values.map((axis2) => Array(axis1Values.length).fill(axis2));
+        const axis1Label = slice.axis1_label || "X";
+        const axis2Label = slice.axis2_label || "Y";
+
+        const axis1Index = axisIndexLookup[axis1Label.toUpperCase?.() || ""];
+        const axis2Index = axisIndexLookup[axis2Label.toUpperCase?.() || ""];
+        const axis1RangeFromBounds =
+          Array.isArray(axisBounds) && Number.isInteger(axis1Index)
+            ? axisBounds[axis1Index]
+            : null;
+        const axis2RangeFromBounds =
+          Array.isArray(axisBounds) && Number.isInteger(axis2Index)
+            ? axisBounds[axis2Index]
+            : null;
+
+        const axis1Range = sanitizeRange(axis1RangeFromBounds) || sanitizeRange(computeRangeFromValues(axis1Values));
+        const axis2Range = sanitizeRange(axis2RangeFromBounds) || sanitizeRange(computeRangeFromValues(axis2Values));
+
+        const surfaceTrace = {
+          type: "surface",
+          x: xGrid,
+          y: yGrid,
+          z: zMatrix,
+          colorscale: "Turbo",
+          opacity: occlusionEnabled ? 1 : 0.85,
+          name: "補間サーフェス",
+          showscale: false,
+        };
+
+        const datasetTrace = {
+          type: "scatter3d",
+          mode: "markers",
+          x: projected?.x || [],
+          y: projected?.y || [],
+          z: projected?.z || [],
+          marker: {
+            size: markerSize,
+            color: "#ff4081",
+            opacity: occlusionEnabled ? 1 : 0.9,
+          },
+          name: "元データ",
+          hovertemplate: "(%{x}, %{y}, %{z})<extra>元データ</extra>",
+        };
+
+        const baseLayout = {
+          margin: { l: 0, r: 0, t: 0, b: 0 },
+          scene: {
+            xaxis: {
+              title: axis1Label,
+              range: axis1Range ? [axis1Range[0], axis1Range[1]] : undefined,
+            },
+            yaxis: {
+              title: axis2Label,
+              range: axis2Range ? [axis2Range[0], axis2Range[1]] : undefined,
+            },
+            zaxis: { title: "Value" },
+            bgcolor: "#f8f9fa",
+          },
+          legend: { orientation: "h" },
+        };
+
+        const modalLayout = JSON.parse(JSON.stringify(baseLayout));
+        modalLayout.height = 580;
+        modalLayout.margin = { l: 20, r: 20, t: 30, b: 30 };
+
+        const traces = occlusionEnabled ? [surfaceTrace, datasetTrace] : [datasetTrace, surfaceTrace];
+
+        return {
+          traces,
+          layout: baseLayout,
+          modalLayout,
+          axis1Range,
+          axis2Range,
+          axis1Label,
+          axis2Label,
+        };
+      }
+
+      let planeModalContext = null;
+
+      function setPlaneModalPlaceholders(context) {
+        if (!context) {
+          return;
+        }
+        const formatPlaceholder = (range, index) => {
+          if (!Array.isArray(range)) {
+            return "自動";
+          }
+          const value = Number(range[index]);
+          if (!Number.isFinite(value)) {
+            return "自動";
+          }
+          return value.toFixed(4);
+        };
+        if (planeModalAxis1Min) {
+          planeModalAxis1Min.value = "";
+          planeModalAxis1Min.placeholder = formatPlaceholder(context.axis1Range, 0);
+        }
+        if (planeModalAxis1Max) {
+          planeModalAxis1Max.value = "";
+          planeModalAxis1Max.placeholder = formatPlaceholder(context.axis1Range, 1);
+        }
+        if (planeModalAxis2Min) {
+          planeModalAxis2Min.value = "";
+          planeModalAxis2Min.placeholder = formatPlaceholder(context.axis2Range, 0);
+        }
+        if (planeModalAxis2Max) {
+          planeModalAxis2Max.value = "";
+          planeModalAxis2Max.placeholder = formatPlaceholder(context.axis2Range, 1);
+        }
+      }
+
+      function parseRangeInputs(minInput, maxInput) {
+        if (!minInput || !maxInput) {
+          return null;
+        }
+        const min = Number.parseFloat(minInput.value);
+        const max = Number.parseFloat(maxInput.value);
+        if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
+          return [min, max];
+        }
+        return null;
+      }
+
+      function renderPlaneModalPlot() {
+        if (!planeModalContext || !planeModalPlotEl || typeof Plotly === "undefined") {
+          return;
+        }
+        const layout = JSON.parse(JSON.stringify(planeModalContext.layout || {}));
+        layout.height = Math.max(planeModalPlotEl.clientHeight, 520);
+        const scene = layout.scene || {};
+        layout.scene = scene;
+        const axis1Range = parseRangeInputs(planeModalAxis1Min, planeModalAxis1Max);
+        if (axis1Range) {
+          scene.xaxis = Object.assign({}, scene.xaxis, {
+            range: axis1Range,
+            autorange: false,
+          });
+        }
+        const axis2Range = parseRangeInputs(planeModalAxis2Min, planeModalAxis2Max);
+        if (axis2Range) {
+          scene.yaxis = Object.assign({}, scene.yaxis, {
+            range: axis2Range,
+            autorange: false,
+          });
+        }
+        Plotly.newPlot(planeModalPlotEl, cloneTraces(planeModalContext.traces), layout, {
+          responsive: true,
+          displaylogo: false,
+          scrollZoom: true,
+          modeBarButtonsToRemove: ["toImage"],
+        });
+      }
+
+      function openPlaneModal(context) {
+        if (!planeModalEl || !planeModalPlotEl || !context) {
+          return;
+        }
+        planeModalContext = {
+          title: context.title || "拡大表示",
+          traces: context.traces || [],
+          layout: context.layout || {},
+          axis1Range: context.axis1Range || null,
+          axis2Range: context.axis2Range || null,
+        };
+        if (planeModalTitleEl) {
+          planeModalTitleEl.textContent = planeModalContext.title;
+        }
+        if (planeModalAxis1LabelMin) {
+          planeModalAxis1LabelMin.textContent = `${context.axis1Label || "横軸"} 最小`;
+        }
+        if (planeModalAxis1LabelMax) {
+          planeModalAxis1LabelMax.textContent = `${context.axis1Label || "横軸"} 最大`;
+        }
+        if (planeModalAxis2LabelMin) {
+          planeModalAxis2LabelMin.textContent = `${context.axis2Label || "縦軸"} 最小`;
+        }
+        if (planeModalAxis2LabelMax) {
+          planeModalAxis2LabelMax.textContent = `${context.axis2Label || "縦軸"} 最大`;
+        }
+        setPlaneModalPlaceholders(planeModalContext);
+        if (planeModalBackdrop) {
+          planeModalBackdrop.classList.add("open");
+        }
+        planeModalEl.classList.add("open");
+        planeModalEl.setAttribute("aria-hidden", "false");
+        renderPlaneModalPlot();
+      }
+
+      function closePlaneModal() {
+        if (planeModalEl) {
+          planeModalEl.classList.remove("open");
+          planeModalEl.setAttribute("aria-hidden", "true");
+        }
+        if (planeModalBackdrop) {
+          planeModalBackdrop.classList.remove("open");
+        }
+        if (planeModalPlotEl && window.Plotly && typeof Plotly.purge === "function") {
+          Plotly.purge(planeModalPlotEl);
+        }
+        planeModalContext = null;
+      }
+
       function render3DPlots(results, dataset) {
         if (typeof Plotly === "undefined") {
           plotsContainer.textContent = "Plotly の読み込みに失敗しました。ページを再読み込みしてください。";
@@ -897,7 +1315,6 @@
         const axisBounds = Array.isArray(dataset?.axis_bounds)
           ? dataset.axis_bounds
           : null;
-        const axisIndexLookup = { X: 0, Y: 1, Z: 2 };
 
         results.forEach((item, index) => {
           const slice = item.slice;
@@ -937,77 +1354,51 @@
 
           plotsContainer.appendChild(card);
 
-          const axis1Values = slice.axis1_values.map((value) => Number(value));
-          const axis2Values = slice.axis2_values.map((value) => Number(value));
-          const zMatrix = slice.matrix.map((row) => row.map((value) => Number(value)));
+          const payload = buildPlanePlotPayload({
+            slice,
+            projected,
+            axisBounds,
+            occlusionEnabled,
+            markerSize,
+          });
 
-          const xGrid = axis2Values.map(() => axis1Values.slice());
-          const yGrid = axis2Values.map((axis2) =>
-            Array(axis1Values.length).fill(axis2)
-          );
+          if (!payload) {
+            const message = document.createElement("p");
+            message.style.margin = "0";
+            message.textContent = "補間サーフェスを描画できませんでした。";
+            card.appendChild(message);
+            return;
+          }
 
-          const axis1RangeIndex = axisIndexLookup[slice.axis1_label?.toUpperCase?.() || ""];
-          const axis2RangeIndex = axisIndexLookup[slice.axis2_label?.toUpperCase?.() || ""];
-          const axis1Range =
-            axisBounds && Number.isInteger(axis1RangeIndex)
-              ? axisBounds[axis1RangeIndex]
-              : null;
-          const axis2Range =
-            axisBounds && Number.isInteger(axis2RangeIndex)
-              ? axisBounds[axis2RangeIndex]
-              : null;
+          const compactLayout = JSON.parse(JSON.stringify(payload.layout || {}));
 
-          const surfaceTrace = {
-            type: "surface",
-            x: xGrid,
-            y: yGrid,
-            z: zMatrix,
-            colorscale: "Turbo",
-            opacity: occlusionEnabled ? 1 : 0.85,
-            name: "補間サーフェス",
-            showscale: false,
-          };
-
-          const datasetTrace = {
-            type: "scatter3d",
-            mode: "markers",
-            x: projected.x,
-            y: projected.y,
-            z: projected.z,
-            marker: {
-              size: markerSize,
-              color: "#ff4081",
-              opacity: occlusionEnabled ? 1 : 0.9,
-            },
-            name: "元データ",
-            hovertemplate: "(%{x}, %{y}, %{z})<extra>元データ</extra>",
-          };
-
-          const layout = {
-            margin: { l: 0, r: 0, t: 0, b: 0 },
-            scene: {
-              xaxis: {
-                title: slice.axis1_label,
-                range: axis1Range ? [axis1Range[0], axis1Range[1]] : undefined,
-              },
-              yaxis: {
-                title: slice.axis2_label,
-                range: axis2Range ? [axis2Range[0], axis2Range[1]] : undefined,
-              },
-              zaxis: { title: "Value" },
-              bgcolor: "#f8f9fa",
-            },
-            legend: { orientation: "h" },
-          };
-
-          const traces = occlusionEnabled
-            ? [surfaceTrace, datasetTrace]
-            : [datasetTrace, surfaceTrace];
-
-          Plotly.newPlot(plotDiv, traces, layout, {
+          Plotly.newPlot(plotDiv, cloneTraces(payload.traces), compactLayout, {
             responsive: true,
             displaylogo: false,
             modeBarButtonsToRemove: ["toImage"],
+          });
+
+          const openModalHandler = () => {
+            openPlaneModal({
+              title: heading.textContent,
+              traces: payload.traces,
+              layout: payload.modalLayout || payload.layout,
+              axis1Label: payload.axis1Label,
+              axis2Label: payload.axis2Label,
+              axis1Range: payload.axis1Range,
+              axis2Range: payload.axis2Range,
+            });
+          };
+
+          heading.classList.add("plot-title-button");
+          heading.setAttribute("role", "button");
+          heading.tabIndex = 0;
+          heading.addEventListener("click", openModalHandler);
+          heading.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openModalHandler();
+            }
           });
         });
       }
@@ -1132,6 +1523,37 @@
         })();
         await trainingPromise;
       }
+
+
+      [planeModalAxis1Min, planeModalAxis1Max, planeModalAxis2Min, planeModalAxis2Max]
+        .filter(Boolean)
+        .forEach((input) => {
+          input.addEventListener("input", () => {
+            renderPlaneModalPlot();
+          });
+          input.addEventListener("change", () => {
+            renderPlaneModalPlot();
+          });
+        });
+
+      if (planeModalCloseButton) {
+        planeModalCloseButton.addEventListener("click", closePlaneModal);
+      }
+      if (planeModalBackdrop) {
+        planeModalBackdrop.addEventListener("click", closePlaneModal);
+      }
+      if (planeModalEl) {
+        planeModalEl.addEventListener("click", (event) => {
+          if (event.target === planeModalEl) {
+            closePlaneModal();
+          }
+        });
+      }
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closePlaneModal();
+        }
+      });
 
 
       buttonEl.addEventListener("click", runPredictionOnly);

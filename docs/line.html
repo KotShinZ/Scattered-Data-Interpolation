@@ -9,15 +9,15 @@
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
       :root {
-        --bg-start: #0f172a;
-        --bg-end: #312f87;
-        --card-bg: rgba(255, 255, 255, 0.07);
-        --card-border: rgba(255, 255, 255, 0.2);
-        --text-main: #f4f6fb;
-        --text-muted: rgba(244, 246, 251, 0.8);
-        --accent: #60a5fa;
-        --accent-strong: #818cf8;
-        --shadow: 0 25px 80px rgba(8, 12, 32, 0.45);
+        --bg-start: #fdfdfd;
+        --bg-end: #edf2ff;
+        --card-bg: rgba(255, 255, 255, 0.92);
+        --card-border: rgba(15, 23, 42, 0.08);
+        --text-main: #0f172a;
+        --text-muted: rgba(15, 23, 42, 0.65);
+        --accent: #2563eb;
+        --accent-strong: #7c3aed;
+        --shadow: 0 18px 55px rgba(15, 23, 42, 0.15);
       }
 
       * {
@@ -27,7 +27,7 @@
       body {
         margin: 0;
         min-height: 100vh;
-        background: radial-gradient(circle at top, rgba(96, 165, 250, 0.25), transparent 55%),
+        background: radial-gradient(circle at top, rgba(221, 214, 254, 0.6), transparent 60%),
           linear-gradient(145deg, var(--bg-start), var(--bg-end));
         color: var(--text-main);
         padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
@@ -43,7 +43,8 @@
       }
 
       .hero-card {
-        background: var(--card-bg);
+        background: radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 45%),
+          var(--card-bg);
         border: 1px solid var(--card-border);
         border-radius: 32px;
         padding: clamp(1.5rem, 4vw, 2.75rem);
@@ -84,15 +85,15 @@
         font-size: 1rem;
         font-weight: 600;
         background: linear-gradient(120deg, var(--accent), var(--accent-strong));
-        color: #0b1023;
+        color: #fff;
         cursor: pointer;
-        box-shadow: 0 15px 40px rgba(96, 165, 250, 0.35);
+        box-shadow: 0 15px 40px rgba(124, 58, 237, 0.25);
         transition: transform 150ms ease, box-shadow 150ms ease;
       }
 
       button:hover:not([disabled]) {
         transform: translateY(-2px);
-        box-shadow: 0 18px 45px rgba(96, 165, 250, 0.45);
+        box-shadow: 0 18px 45px rgba(37, 99, 235, 0.35);
       }
 
       button[disabled] {
@@ -117,7 +118,6 @@
         border: 1px solid var(--card-border);
         border-radius: 28px;
         padding: 1.5rem;
-        backdrop-filter: blur(18px);
         box-shadow: var(--shadow);
       }
 
@@ -145,8 +145,8 @@
       select,
       input[type='number'],
       input[type='file'] {
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(15, 23, 42, 0.15);
         border-radius: 12px;
         padding: 0.65rem 0.9rem;
         color: var(--text-main);
@@ -155,7 +155,7 @@
 
       input[type='file'] {
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(37, 99, 235, 0.08);
       }
 
       input:disabled,
@@ -178,13 +178,14 @@
 
       .fixed-control {
         border-radius: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         padding: 1rem;
-        background: rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.85);
         display: flex;
         flex-direction: column;
         gap: 0.4rem;
         transition: transform 150ms ease, border-color 150ms ease;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
       }
 
       .fixed-control.disabled {
@@ -193,27 +194,28 @@
 
       .fixed-control:hover {
         transform: translateY(-2px);
-        border-color: rgba(255, 255, 255, 0.3);
+        border-color: rgba(37, 99, 235, 0.35);
       }
 
       table {
         width: 100%;
         border-collapse: collapse;
-        background: rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.95);
         border-radius: 22px;
         overflow: hidden;
+        box-shadow: 0 15px 40px rgba(15, 23, 42, 0.1);
       }
 
       th,
       td {
         padding: 0.85rem;
         text-align: center;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
         font-variant-numeric: tabular-nums;
       }
 
       thead {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(99, 102, 241, 0.1);
       }
 
       tbody tr:last-child td {
@@ -233,14 +235,14 @@
       }
 
       .plot-card {
-        background: rgba(5, 10, 32, 0.7);
+        background: rgba(249, 250, 255, 0.95);
         border-radius: 22px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         padding: 1rem;
         display: flex;
         flex-direction: column;
         gap: 0.6rem;
-        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 15px 40px rgba(15, 23, 42, 0.12);
       }
 
       .plot-card header {
@@ -250,22 +252,20 @@
         gap: 0.8rem;
       }
 
-      .plot-card header h3 {
+      .plot-card header h3,
+      .plot-title-button {
         margin: 0;
+        cursor: pointer;
+        transition: color 0.2s ease, transform 0.2s ease;
       }
 
-      .expand-btn {
-        border-radius: 999px;
-        padding: 0.35rem 1rem;
-        font-size: 0.85rem;
-        background: rgba(255, 255, 255, 0.12);
-        color: var(--text-main);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: none;
-      }
-
-      .expand-btn:hover {
-        background: rgba(255, 255, 255, 0.25);
+      .plot-card header h3:hover,
+      .plot-card header h3:focus-visible,
+      .plot-title-button:hover,
+      .plot-title-button:focus-visible {
+        color: var(--accent);
+        outline: none;
+        transform: translateY(-1px);
       }
 
       .plot-container {
@@ -276,27 +276,29 @@
 
       .skipped {
         margin-top: 1rem;
-        background: rgba(255, 186, 8, 0.12);
-        border: 1px solid rgba(255, 186, 8, 0.35);
+        background: rgba(250, 204, 21, 0.18);
+        border: 1px solid rgba(250, 204, 21, 0.4);
         border-radius: 18px;
         padding: 1rem;
-        color: #ffe0a3;
+        color: #92400e;
+        font-weight: 600;
       }
 
       .hint-box {
         margin-top: 0.8rem;
         padding: 0.85rem 1rem;
         border-radius: 18px;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(226, 232, 240, 0.7);
         color: var(--text-muted);
       }
 
       .modal-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(5, 8, 20, 0.7);
+        background: rgba(15, 23, 42, 0.45);
         z-index: 90;
         display: none;
+        backdrop-filter: blur(2px);
       }
 
       .modal-backdrop.open {
@@ -320,10 +322,10 @@
       .modal-content {
         width: min(1200px, 95vw);
         height: min(85vh, 720px);
-        background: rgba(9, 12, 30, 0.9);
+        background: rgba(255, 255, 255, 0.98);
         border-radius: 32px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 25px 90px rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 25px 90px rgba(15, 23, 42, 0.25);
         padding: 1.5rem;
         display: flex;
         flex-direction: column;
@@ -343,10 +345,45 @@
 
       .modal-close {
         align-self: flex-start;
-        background: rgba(255, 255, 255, 0.15);
+        background: rgba(37, 99, 235, 0.15);
         border-radius: 999px;
         padding: 0.45rem 1.2rem;
         font-size: 0.9rem;
+        color: var(--text-main);
+      }
+
+      .modal-range-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.8rem;
+      }
+
+      .modal-range-grid label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .modal-range-grid input {
+        border-radius: 0.9rem;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        padding: 0.55rem 0.75rem;
+        font-size: 0.95rem;
+      }
+
+      .modal-range-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .modal-range-actions button {
+        border-radius: 999px;
+        padding: 0.4rem 1.2rem;
+        font-size: 0.85rem;
+        background: rgba(15, 23, 42, 0.08);
+        color: var(--text-main);
       }
 
       #modal-plot {
@@ -476,6 +513,27 @@
           <h3 id="modal-title">拡大表示</h3>
           <button type="button" class="modal-close" id="modal-close">閉じる</button>
         </header>
+        <div class="modal-range-grid">
+          <label>
+            <span id="modal-x-label-min">横軸 最小</span>
+            <input type="number" id="modal-x-min" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="modal-x-label-max">横軸 最大</span>
+            <input type="number" id="modal-x-max" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="modal-y-label-min">縦軸 最小</span>
+            <input type="number" id="modal-y-min" step="any" placeholder="自動" />
+          </label>
+          <label>
+            <span id="modal-y-label-max">縦軸 最大</span>
+            <input type="number" id="modal-y-max" step="any" placeholder="自動" />
+          </label>
+        </div>
+        <div class="modal-range-actions">
+          <button type="button" id="modal-range-reset">入力をクリア</button>
+        </div>
         <div id="modal-plot"></div>
       </div>
     </div>
@@ -511,6 +569,15 @@
       const modalPlotEl = document.getElementById("modal-plot");
       const modalTitleEl = document.getElementById("modal-title");
       const modalCloseButton = document.getElementById("modal-close");
+      const modalXAxisMin = document.getElementById("modal-x-min");
+      const modalXAxisMax = document.getElementById("modal-x-max");
+      const modalYAxisMin = document.getElementById("modal-y-min");
+      const modalYAxisMax = document.getElementById("modal-y-max");
+      const modalXAxisLabelMin = document.getElementById("modal-x-label-min");
+      const modalXAxisLabelMax = document.getElementById("modal-x-label-max");
+      const modalYAxisLabelMin = document.getElementById("modal-y-label-min");
+      const modalYAxisLabelMax = document.getElementById("modal-y-label-max");
+      const modalRangeResetButton = document.getElementById("modal-range-reset");
 
       if (buttonEl) {
         buttonEl.disabled = true;
@@ -531,6 +598,7 @@
         x: { min: null, max: null },
         y: { min: null, max: null },
       };
+      let modalContext = null;
       const plotlyConfig = {
         responsive: true,
         displaylogo: false,
@@ -1095,22 +1163,106 @@
         };
       }
 
+      function formatModalPlaceholder(range, index) {
+        if (!Array.isArray(range)) {
+          return "自動";
+        }
+        const value = Number(range[index]);
+        if (!Number.isFinite(value)) {
+          return "自動";
+        }
+        return value.toFixed(4);
+      }
+
+      function resetModalInputs(rangeX, rangeY) {
+        if (modalXAxisMin) {
+          modalXAxisMin.value = "";
+          modalXAxisMin.placeholder = formatModalPlaceholder(rangeX, 0);
+        }
+        if (modalXAxisMax) {
+          modalXAxisMax.value = "";
+          modalXAxisMax.placeholder = formatModalPlaceholder(rangeX, 1);
+        }
+        if (modalYAxisMin) {
+          modalYAxisMin.value = "";
+          modalYAxisMin.placeholder = formatModalPlaceholder(rangeY, 0);
+        }
+        if (modalYAxisMax) {
+          modalYAxisMax.value = "";
+          modalYAxisMax.placeholder = formatModalPlaceholder(rangeY, 1);
+        }
+      }
+
+      function getModalRange(minInput, maxInput) {
+        if (!minInput || !maxInput) {
+          return null;
+        }
+        const min = Number.parseFloat(minInput.value);
+        const max = Number.parseFloat(maxInput.value);
+        if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
+          return [min, max];
+        }
+        return null;
+      }
+
+      function renderModalPlot() {
+        if (!modalContext || !plotModal || !modalPlotEl || typeof Plotly === "undefined") {
+          return;
+        }
+        const layout = JSON.parse(JSON.stringify(modalContext.layout || {}));
+        layout.height = modalPlotEl.clientHeight || 540;
+        layout.margin = Object.assign({ l: 60, r: 30, t: 50, b: 50 }, layout.margin || {});
+        const xRange = getModalRange(modalXAxisMin, modalXAxisMax);
+        if (xRange) {
+          layout.xaxis = Object.assign({}, layout.xaxis, {
+            range: xRange,
+            autorange: false,
+          });
+        }
+        const yRange = getModalRange(modalYAxisMin, modalYAxisMax);
+        if (yRange) {
+          layout.yaxis = Object.assign({}, layout.yaxis, {
+            range: yRange,
+            autorange: false,
+          });
+        }
+        Plotly.newPlot(modalPlotEl, cloneTraces(modalContext.traces), layout, plotlyConfig);
+      }
+
       function openPlotModal(title, payload) {
         if (!plotModal || !modalPlotEl || !payload) {
           return;
         }
+        modalContext = {
+          title: title || "拡大表示",
+          traces: payload.traces || [],
+          layout: payload.modalLayout || payload.layout || {},
+          defaultXRange: payload.defaultXRange || null,
+          defaultYRange: payload.defaultYRange || null,
+          axisLabels: payload.axisLabels || { x: "横軸", y: "縦軸" },
+        };
         if (modalTitleEl) {
-          modalTitleEl.textContent = title || "拡大表示";
+          modalTitleEl.textContent = modalContext.title;
         }
+        if (modalXAxisLabelMin) {
+          modalXAxisLabelMin.textContent = `${modalContext.axisLabels.x} 最小`;
+        }
+        if (modalXAxisLabelMax) {
+          modalXAxisLabelMax.textContent = `${modalContext.axisLabels.x} 最大`;
+        }
+        if (modalYAxisLabelMin) {
+          modalYAxisLabelMin.textContent = `${modalContext.axisLabels.y} 最小`;
+        }
+        if (modalYAxisLabelMax) {
+          modalYAxisLabelMax.textContent = `${modalContext.axisLabels.y} 最大`;
+        }
+        resetModalInputs(modalContext.defaultXRange, modalContext.defaultYRange);
         if (modalBackdrop) {
           modalBackdrop.classList.add("open");
         }
         plotModal.classList.add("open");
         plotModal.setAttribute("aria-hidden", "false");
-        const layout = JSON.parse(JSON.stringify(payload.layout || {}));
-        layout.height = modalPlotEl.clientHeight || 520;
-        layout.margin = Object.assign({ l: 60, r: 30, t: 40, b: 50 }, layout.margin || {});
-        Plotly.newPlot(modalPlotEl, cloneTraces(payload.traces), layout, plotlyConfig);
+        renderModalPlot();
       }
 
       function closePlotModal() {
@@ -1124,6 +1276,8 @@
         if (modalPlotEl && window.Plotly && typeof Plotly.purge === "function") {
           Plotly.purge(modalPlotEl);
         }
+        resetModalInputs(null, null);
+        modalContext = null;
       }
 
       function buildPlotPayload(item) {
@@ -1135,6 +1289,9 @@
           : [];
         const predictedValues = Array.isArray(item.predicted_values)
           ? item.predicted_values.map((value) => Number(value))
+          : [];
+        const datasetValues = Array.isArray(latestDataset?.values)
+          ? latestDataset.values.map((value) => Number(value))
           : [];
         const datasetTrace = buildDatasetProjectionTrace(
           latestDataset,
@@ -1160,7 +1317,26 @@
           legend: { orientation: "h", y: -0.2 },
         };
         applyAxisRangesToLayout(layout, item);
-        return { traces, layout };
+        const modalLayout = JSON.parse(JSON.stringify(layout));
+        modalLayout.height = 540;
+        modalLayout.margin = Object.assign({ l: 60, r: 30, t: 50, b: 50 }, modalLayout.margin || {});
+
+        const computeDefaultRange = (values) => {
+          const finite = filterFinite(values);
+          if (!finite.length) {
+            return null;
+          }
+          return [Math.min(...finite), Math.max(...finite)];
+        };
+
+        const axisLabels = {
+          x: `${item.varying_axis_label} 軸`,
+          y: "予測値",
+        };
+        const defaultXRange = computeDefaultRange(axisValues);
+        const defaultYRange = computeDefaultRange(predictedValues.concat(datasetValues));
+
+        return { traces, layout, modalLayout, axisLabels, defaultXRange, defaultYRange };
       }
 
       function renderLinePlots(results) {
@@ -1178,12 +1354,10 @@
           const header = document.createElement("header");
           const title = document.createElement("h3");
           title.textContent = `${item.method} (${item.smoothness_class})`;
+          title.classList.add("plot-title-button");
+          title.setAttribute("role", "button");
+          title.tabIndex = 0;
           header.appendChild(title);
-          const expandButton = document.createElement("button");
-          expandButton.type = "button";
-          expandButton.className = "expand-btn";
-          expandButton.textContent = "拡大表示";
-          header.appendChild(expandButton);
           card.appendChild(header);
 
           const caption = document.createElement("p");
@@ -1211,9 +1385,15 @@
             { ...payload.layout },
             plotlyConfig
           );
-
-          expandButton.addEventListener("click", () => {
-            openPlotModal(title.textContent, buildPlotPayload(item));
+          const openModalHandler = () => {
+            openPlotModal(title.textContent, payload);
+          };
+          title.addEventListener("click", openModalHandler);
+          title.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openModalHandler();
+            }
           });
         });
       }
@@ -1229,6 +1409,20 @@
           if (event.target === plotModal) {
             closePlotModal();
           }
+        });
+      }
+      [modalXAxisMin, modalXAxisMax, modalYAxisMin, modalYAxisMax]
+        .filter(Boolean)
+        .forEach((input) => {
+          input.addEventListener("input", renderModalPlot);
+          input.addEventListener("change", renderModalPlot);
+        });
+      if (modalRangeResetButton) {
+        modalRangeResetButton.addEventListener("click", () => {
+          const xRange = modalContext ? modalContext.defaultXRange : null;
+          const yRange = modalContext ? modalContext.defaultYRange : null;
+          resetModalInputs(xRange, yRange);
+          renderModalPlot();
         });
       }
       document.addEventListener("keydown", (event) => {
