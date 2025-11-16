@@ -57,6 +57,22 @@ class LinePredictionSessionTests(unittest.TestCase):
         self.assertGreaterEqual(fixed_axes["y"], self.bounds["y"][0])
         self.assertLessEqual(fixed_axes["y"], self.bounds["y"][1])
 
+    def test_line_resolution_override(self) -> None:
+        session = fit_session(dataset=self.dataset, grid_size=5, test_ratio=0.25)
+        requested_resolution = 150
+        result = predict_line_session(
+            session=session,
+            varying_axis="y",
+            line_resolution=requested_resolution,
+        )
+
+        line_results = result["line_results"]
+        self.assertTrue(line_results, "line results should not be empty")
+        axis_values = line_results[0]["axis_values"]
+        expected_length = max(5, requested_resolution)
+        self.assertEqual(len(axis_values), expected_length)
+        self.assertEqual(result["line_resolution"], expected_length)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -197,6 +197,32 @@
         border-color: rgba(37, 99, 235, 0.35);
       }
 
+      .resolution-box {
+        margin-top: 1.2rem;
+        padding: 1rem;
+        border-radius: 20px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .resolution-box label {
+        font-weight: 600;
+      }
+
+      .resolution-box input {
+        max-width: 200px;
+      }
+
+      .resolution-box p {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -454,6 +480,20 @@
               <input id="fixed-z" type="number" step="any" value="0.5" />
             </label>
           </div>
+          <div class="resolution-box">
+            <label for="line-resolution">ライン解像度（サンプル数）</label>
+            <input
+              id="line-resolution"
+              type="number"
+              step="10"
+              min="10"
+              max="2000"
+              value="60"
+            />
+            <p>
+              大きな値にすると折れ線が滑らかになります（最大 2000）。値を下げると計算は速くなります。
+            </p>
+          </div>
         </article>
 
         <article class="panel">
@@ -547,6 +587,7 @@
       const plotsContainer = document.getElementById("plots-container");
       const skippedContainer = document.getElementById("skipped");
       const lineAxisSelect = document.getElementById("line-axis");
+      const lineResolutionInput = document.getElementById("line-resolution");
       const fixedInputs = {
         x: document.getElementById("fixed-x"),
         y: document.getElementById("fixed-y"),
@@ -599,6 +640,8 @@
         y: { min: null, max: null },
       };
       let modalContext = null;
+      const DEFAULT_LINE_RESOLUTION = 60;
+      const LINE_RESOLUTION_LIMITS = { min: 10, max: 2000 };
       const plotlyConfig = {
         responsive: true,
         displaylogo: false,
@@ -608,6 +651,21 @@
 
       setAxisControlsDisabled(true);
       syncRangeInputsFromState();
+      if (lineResolutionInput) {
+        lineResolutionInput.value = String(DEFAULT_LINE_RESOLUTION);
+        const ensureBounds = () => {
+          sanitizeLineResolutionInput();
+        };
+        lineResolutionInput.addEventListener("change", ensureBounds);
+        lineResolutionInput.addEventListener("blur", ensureBounds);
+        lineResolutionInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            sanitizeLineResolutionInput();
+            runLinePrediction();
+          }
+        });
+      }
 
       if (rangeApplyButton) {
         rangeApplyButton.addEventListener("click", applyAxisRangeSettings);
@@ -825,6 +883,36 @@
             parent.classList.toggle("disabled", disable);
           }
         });
+      }
+
+      function sanitizeLineResolutionInput() {
+        if (!lineResolutionInput) {
+          return;
+        }
+        let parsed = Number.parseInt(lineResolutionInput.value, 10);
+        if (!Number.isFinite(parsed)) {
+          lineResolutionInput.value = String(DEFAULT_LINE_RESOLUTION);
+          return;
+        }
+        parsed = Math.min(
+          Math.max(parsed, LINE_RESOLUTION_LIMITS.min),
+          LINE_RESOLUTION_LIMITS.max
+        );
+        lineResolutionInput.value = String(parsed);
+      }
+
+      function getLineResolutionPayload() {
+        if (!lineResolutionInput) {
+          return null;
+        }
+        const parsed = Number.parseInt(lineResolutionInput.value, 10);
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        return Math.min(
+          Math.max(parsed, LINE_RESOLUTION_LIMITS.min),
+          LINE_RESOLUTION_LIMITS.max
+        );
       }
 
       function setFixedDefaultsFromBounds(bounds) {
@@ -1461,6 +1549,7 @@
           const result = await callWorker("predictLine", {
             lineAxis: axis,
             fixedValues: fixedPayload,
+            lineResolution: getLineResolutionPayload(),
           });
           latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
           latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];
@@ -1471,6 +1560,9 @@
           if (lineAxisSelect && result.line_axis) {
             lineAxisSelect.value = result.line_axis;
             updateFixedControlsState();
+          }
+          if (lineResolutionInput && Number.isFinite(result.line_resolution)) {
+            lineResolutionInput.value = String(result.line_resolution);
           }
           if (latestDataset && Array.isArray(latestDataset.axis_bounds)) {
             setFixedDefaultsFromBounds(latestDataset.axis_bounds);

@@ -86,6 +86,10 @@ async function handlePredictLine(payload) {
   const pyodide = await ensurePyodide();
   const axis = payload && payload.lineAxis ? payload.lineAxis : "z";
   const fixed = payload && payload.fixedValues ? payload.fixedValues : null;
+  const resolution =
+    payload && Number.isFinite(payload.lineResolution)
+      ? Number(payload.lineResolution)
+      : null;
   let pyFixed = null;
   if (fixed !== null) {
     pyFixed = pyodide.toPy(fixed);
@@ -93,6 +97,7 @@ async function handlePredictLine(payload) {
   try {
     pyodide.globals.set("PY_LINE_AXIS", axis);
     pyodide.globals.set("PY_FIXED_AXES", pyFixed);
+    pyodide.globals.set("PY_LINE_RESOLUTION", resolution);
     const resultJson = await pyodide.runPythonAsync(`import json
 from compare_interpolation import predict_line_session
 line_axis = globals().get("PY_LINE_AXIS") or "z"
@@ -100,11 +105,13 @@ fixed_candidate = globals().get("PY_FIXED_AXES")
 fixed_values = None
 if fixed_candidate is not None:
     fixed_values = fixed_candidate
-json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_values), ensure_ascii=False)`);
+line_resolution = globals().get("PY_LINE_RESOLUTION")
+json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_values, line_resolution=line_resolution), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {
     pyodide.globals.set("PY_LINE_AXIS", null);
     pyodide.globals.set("PY_FIXED_AXES", null);
+    pyodide.globals.set("PY_LINE_RESOLUTION", null);
     if (pyFixed && typeof pyFixed.destroy === "function") {
       pyFixed.destroy();
     }

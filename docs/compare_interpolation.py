@@ -23,6 +23,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 Point3D = Tuple[float, float, float]
 
 AXIS_LABELS = ["X", "Y", "Z"]
+# Line slices are visualized as dense curves, so oversample beyond the coarse
+# cube grid we use for plane surfaces.
+LINE_SLICE_RESOLUTION = 60
 
 
 # ---------------------------------------------------------------------------
@@ -1042,19 +1045,30 @@ def compute_prediction(
     return results, normalized_axis, resolved_slice_value
 
 
+def _sanitize_line_resolution(candidate: Optional[float]) -> int:
+    if candidate is None:
+        return LINE_SLICE_RESOLUTION
+    try:
+        numeric = int(candidate)
+    except (TypeError, ValueError):
+        return LINE_SLICE_RESOLUTION
+    return max(2, numeric)
+
+
 def compute_line_predictions(
     session: ComparisonSession,
     varying_axis: str = "z",
     fixed_values: Optional[Dict[str, float]] = None,
-) -> Tuple[List[LineSliceResult], str, Dict[str, float]]:
+    line_resolution: Optional[int] = None,
+) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (varying_axis or "z").lower()
     varying_index = axis_lookup.get(normalized_axis, 2)
 
-    axis_values = session.grid_axes[varying_index][:]
-    if not axis_values:
-        lower, upper = session.axis_bounds[varying_index]
-        axis_values, _ = create_grid(session.grid_size, lower, upper)
+    lower, upper = session.axis_bounds[varying_index]
+    sanitized_resolution = _sanitize_line_resolution(line_resolution)
+    effective_resolution = max(session.grid_size, sanitized_resolution)
+    axis_values, _ = create_grid(effective_resolution, lower, upper)
 
     normalized_fixed_input: Dict[str, float] = {}
     if isinstance(fixed_values, dict):
@@ -1112,7 +1126,7 @@ def compute_line_predictions(
             )
         )
 
-    return results, normalized_axis, resolved_fixed
+    return results, normalized_axis, resolved_fixed, effective_resolution
 
 
 def fit_session(
@@ -1200,6 +1214,7 @@ def predict_session(
 def predict_line_session(
     varying_axis: str = "z",
     fixed_values: Optional[Dict[str, float]] = None,
+    line_resolution: Optional[int] = None,
     *,
     session: Optional[ComparisonSession] = None,
 ) -> Dict[str, object]:
@@ -1207,8 +1222,16 @@ def predict_line_session(
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
-    line_results, normalized_axis, resolved_fixed = compute_line_predictions(
-        active_session, varying_axis, fixed_values
+    (
+        line_results,
+        normalized_axis,
+        resolved_fixed,
+        resolved_resolution,
+    ) = compute_line_predictions(
+        active_session,
+        varying_axis,
+        fixed_values,
+        line_resolution=line_resolution,
     )
 
     dataset_payload = build_dataset_payload(
@@ -1225,6 +1248,7 @@ def predict_line_session(
         "line_axis": normalized_axis,
         "fixed_axes": resolved_fixed,
         "summaries": serialize_method_summaries(active_session.methods),
+        "line_resolution": resolved_resolution,
     }
 
 
