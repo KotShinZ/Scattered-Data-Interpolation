@@ -176,6 +176,28 @@
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       }
 
+      .point-range-grid {
+        display: grid;
+        gap: 0.8rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin-top: 0.75rem;
+      }
+
+      .point-range-grid label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .point-range-grid input {
+        border-radius: 0.9rem;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        padding: 0.6rem 0.8rem;
+        font-size: 0.95rem;
+      }
+
       .fixed-control {
         border-radius: 20px;
         border: 1px solid rgba(15, 23, 42, 0.08);
@@ -455,6 +477,43 @@
           </div>
         </article>
 
+        <article class="panel range-panel">
+          <h2>元データ表示範囲</h2>
+          <p>
+            折れ線グラフと拡大ビューに重ねる元データの散布点を、指定した X/Y/Z の最小値・最大値で絞り込みます。
+            データ読み込み時に自動値がセットされ、入力を変更すると即座に反映されます。
+          </p>
+          <div class="point-range-grid">
+            <label>
+              <span>X 最小値</span>
+              <input id="point-range-x-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>X 最大値</span>
+              <input id="point-range-x-max" type="number" step="any" />
+            </label>
+            <label>
+              <span>Y 最小値</span>
+              <input id="point-range-y-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>Y 最大値</span>
+              <input id="point-range-y-max" type="number" step="any" />
+            </label>
+            <label>
+              <span>Z 最小値</span>
+              <input id="point-range-z-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>Z 最大値</span>
+              <input id="point-range-z-max" type="number" step="any" />
+            </label>
+          </div>
+          <div class="hint-box">
+            入力を空欄にすると自動設定の値に戻ります。サーフェスビューと同様に、再学習なしで散布点の表示だけを切り替えられます。
+          </div>
+        </article>
+
         <article class="panel">
           <h2>ライン設定</h2>
           <p>変化させたい軸と、残り 2 軸の固定値を入力してください。</p>
@@ -581,6 +640,11 @@
     <script src="dataset-store.js"></script>
     <script>
       const datasetStore = window.datasetStore || null;
+      const DEFAULT_DUMMY_BOUNDS = [
+        [0, 1],
+        [0, 1],
+        [0, 1],
+      ];
       const statusEl = document.getElementById("status");
       const buttonEl = document.getElementById("run-button");
       const tableBody = document.querySelector("#results-table tbody");
@@ -597,6 +661,20 @@
       const useSavedDatasetButton = document.getElementById("use-saved-dataset");
       const fileInput = document.getElementById("csv-input");
       const resetDatasetButton = document.getElementById("reset-dataset");
+      const pointRangeInputs = {
+        x: {
+          min: document.getElementById("point-range-x-min"),
+          max: document.getElementById("point-range-x-max"),
+        },
+        y: {
+          min: document.getElementById("point-range-y-min"),
+          max: document.getElementById("point-range-y-max"),
+        },
+        z: {
+          min: document.getElementById("point-range-z-min"),
+          max: document.getElementById("point-range-z-max"),
+        },
+      };
       const rangeInputs = {
         xMin: document.getElementById("x-range-min"),
         xMax: document.getElementById("x-range-max"),
@@ -633,6 +711,10 @@
       let trainingPromise = null;
       let predicting = false;
       let datasetSource = "none";
+      const axisKeys = ["x", "y", "z"];
+      let defaultPointRange = null;
+      let currentPointRange = null;
+      let pointRangeDirty = false;
 
       let storedSelection = datasetStore ? datasetStore.load() : null;
       const manualAxisRanges = {
@@ -783,6 +865,241 @@
           .filter((value) => Number.isFinite(value));
       }
 
+      function cloneRange(range) {
+        if (!range) {
+          return null;
+        }
+        const copy = {};
+        axisKeys.forEach((axis) => {
+          if (range[axis]) {
+            copy[axis] = {
+              min: Number(range[axis].min),
+              max: Number(range[axis].max),
+            };
+          }
+        });
+        return copy;
+      }
+
+      function rangeFromAxisBounds(bounds) {
+        if (!Array.isArray(bounds) || bounds.length < 3) {
+          return null;
+        }
+        const range = {};
+        axisKeys.forEach((axis, index) => {
+          const pair = bounds[index];
+          if (!Array.isArray(pair) || pair.length < 2) {
+            return;
+          }
+          const min = Number(pair[0]);
+          const max = Number(pair[1]);
+          if (Number.isFinite(min) && Number.isFinite(max)) {
+            range[axis] = { min, max };
+          }
+        });
+        return Object.keys(range).length === axisKeys.length ? range : null;
+      }
+
+      function rangeFromPoints(points) {
+        if (!Array.isArray(points) || !points.length) {
+          return null;
+        }
+        const stats = axisKeys.map(() => ({ min: Infinity, max: -Infinity }));
+        points.forEach((point) => {
+          if (!Array.isArray(point) || point.length < 3) {
+            return;
+          }
+          point.forEach((value, idx) => {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+              return;
+            }
+            if (numeric < stats[idx].min) {
+              stats[idx].min = numeric;
+            }
+            if (numeric > stats[idx].max) {
+              stats[idx].max = numeric;
+            }
+          });
+        });
+        if (stats.some((item) => !Number.isFinite(item.min) || !Number.isFinite(item.max))) {
+          return null;
+        }
+        const range = {};
+        axisKeys.forEach((axis, index) => {
+          range[axis] = {
+            min: stats[index].min,
+            max: stats[index].max,
+          };
+        });
+        return range;
+      }
+
+      function deriveRangeFromDataset(dataset) {
+        if (!dataset || typeof dataset !== "object") {
+          return null;
+        }
+        const fromBounds = rangeFromAxisBounds(dataset.axis_bounds);
+        if (fromBounds) {
+          return fromBounds;
+        }
+        if (Array.isArray(dataset.points)) {
+          return rangeFromPoints(dataset.points);
+        }
+        return null;
+      }
+
+      function applyPointRangeInputs(range) {
+        axisKeys.forEach((axis) => {
+          const controls = pointRangeInputs[axis];
+          if (!controls) {
+            return;
+          }
+          const axisRange = range && range[axis];
+          if (!axisRange) {
+            if (controls.min) {
+              controls.min.value = "";
+            }
+            if (controls.max) {
+              controls.max.value = "";
+            }
+            return;
+          }
+          if (controls.min) {
+            controls.min.value = Number(axisRange.min).toFixed(4);
+          }
+          if (controls.max) {
+            controls.max.value = Number(axisRange.max).toFixed(4);
+          }
+        });
+      }
+
+      function setPointRangeFromDataset(datasetLike, options = {}) {
+        const candidate = deriveRangeFromDataset(datasetLike);
+        if (!candidate) {
+          return;
+        }
+        defaultPointRange = cloneRange(candidate);
+        if (options.force || !pointRangeDirty) {
+          currentPointRange = cloneRange(candidate);
+          pointRangeDirty = false;
+          applyPointRangeInputs(currentPointRange);
+          rerenderPlotsForPointRange();
+        }
+      }
+
+      function getActivePointRange() {
+        return currentPointRange || defaultPointRange;
+      }
+
+      function readPointRangeInputs() {
+        const range = {};
+        let valid = true;
+        axisKeys.forEach((axis) => {
+          const controls = pointRangeInputs[axis];
+          if (!controls) {
+            return;
+          }
+          const rawMin = controls.min ? Number.parseFloat(controls.min.value) : NaN;
+          const rawMax = controls.max ? Number.parseFloat(controls.max.value) : NaN;
+          let min = Number.isFinite(rawMin)
+            ? rawMin
+            : currentPointRange?.[axis]?.min ?? defaultPointRange?.[axis]?.min;
+          let max = Number.isFinite(rawMax)
+            ? rawMax
+            : currentPointRange?.[axis]?.max ?? defaultPointRange?.[axis]?.max;
+          if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            valid = false;
+            return;
+          }
+          if (min > max) {
+            valid = false;
+            return;
+          }
+          range[axis] = { min, max };
+        });
+        return valid ? range : null;
+      }
+
+      function pointWithinRange(point, range) {
+        if (!range) {
+          return true;
+        }
+        for (let index = 0; index < axisKeys.length; index += 1) {
+          const axis = axisKeys[index];
+          const axisRange = range[axis];
+          if (!axisRange) {
+            continue;
+          }
+          const coordinate = Number(point[index]);
+          if (!Number.isFinite(coordinate)) {
+            return false;
+          }
+          if (Number.isFinite(axisRange.min) && coordinate < axisRange.min) {
+            return false;
+          }
+          if (Number.isFinite(axisRange.max) && coordinate > axisRange.max) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      function filterDatasetForDisplay(dataset) {
+        const range = getActivePointRange();
+        if (
+          !range ||
+          !dataset ||
+          typeof dataset !== "object" ||
+          !Array.isArray(dataset.points) ||
+          !Array.isArray(dataset.values)
+        ) {
+          return dataset;
+        }
+        const filteredPoints = [];
+        const filteredValues = [];
+        dataset.points.forEach((point, index) => {
+          if (!Array.isArray(point) || point.length < 3) {
+            return;
+          }
+          const numericPoint = point.map((value) => Number(value));
+          if (numericPoint.some((value) => !Number.isFinite(value))) {
+            return;
+          }
+          const numericValue = Number(dataset.values[index]);
+          if (!Number.isFinite(numericValue)) {
+            return;
+          }
+          if (pointWithinRange(numericPoint, range)) {
+            filteredPoints.push(numericPoint);
+            filteredValues.push(numericValue);
+          }
+        });
+        return {
+          points: filteredPoints,
+          values: filteredValues,
+          axis_bounds: dataset.axis_bounds,
+          source: dataset.source,
+        };
+      }
+
+      function rerenderPlotsForPointRange() {
+        if (!latestLineResults.length || !latestDataset) {
+          return;
+        }
+        renderLinePlots(latestLineResults);
+      }
+
+      function handlePointRangeInput() {
+        pointRangeDirty = true;
+        const range = readPointRangeInputs();
+        if (!range) {
+          return;
+        }
+        currentPointRange = range;
+        rerenderPlotsForPointRange();
+      }
+
       function computeAxisRange(manualRange, fallbackValues) {
         const finiteValues = filterFinite(fallbackValues || []);
         const hasManualMin = Number.isFinite(manualRange.min);
@@ -803,7 +1120,7 @@
         return null;
       }
 
-      function applyAxisRangesToLayout(layout, item) {
+      function applyAxisRangesToLayout(layout, item, datasetForDisplay) {
         if (!layout || !item) {
           return;
         }
@@ -817,8 +1134,8 @@
           delete layout.xaxis.range;
           layout.xaxis.autorange = true;
         }
-        const datasetValues = Array.isArray(latestDataset?.values)
-          ? latestDataset.values
+        const datasetValues = Array.isArray(datasetForDisplay?.values)
+          ? datasetForDisplay.values
           : [];
         const yRange = computeAxisRange(
           manualAxisRanges.y,
@@ -1109,6 +1426,7 @@
             importedDataset = parsedDataset;
             importedDatasetName = file.name;
             datasetSource = "custom";
+            setPointRangeFromDataset(importedDataset, { force: true });
             if (datasetStore && typeof datasetStore.save === "function") {
               datasetStore.save({
                 name: importedDatasetName,
@@ -1141,6 +1459,7 @@
           importedDataset = storedSelection.dataset;
           importedDatasetName = storedSelection.name || "インポートデータ";
           datasetSource = "custom";
+          setPointRangeFromDataset(importedDataset, { force: true });
           updateDatasetLabel();
           statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
           await trainCurrentDataset();
@@ -1152,6 +1471,7 @@
           importedDataset = null;
           importedDatasetName = "";
           datasetSource = "dummy";
+          setPointRangeFromDataset({ axis_bounds: DEFAULT_DUMMY_BOUNDS }, { force: true });
           if (fileInput) {
             fileInput.value = "";
           }
@@ -1368,7 +1688,7 @@
         modalContext = null;
       }
 
-      function buildPlotPayload(item) {
+      function buildPlotPayload(item, datasetForDisplay) {
         if (!item) {
           return null;
         }
@@ -1378,11 +1698,11 @@
         const predictedValues = Array.isArray(item.predicted_values)
           ? item.predicted_values.map((value) => Number(value))
           : [];
-        const datasetValues = Array.isArray(latestDataset?.values)
-          ? latestDataset.values.map((value) => Number(value))
+        const datasetValues = Array.isArray(datasetForDisplay?.values)
+          ? datasetForDisplay.values.map((value) => Number(value))
           : [];
         const datasetTrace = buildDatasetProjectionTrace(
-          latestDataset,
+          datasetForDisplay,
           item.varying_axis_label
         );
         const predictionTrace = {
@@ -1404,7 +1724,7 @@
           showlegend: Boolean(datasetTrace),
           legend: { orientation: "h", y: -0.2 },
         };
-        applyAxisRangesToLayout(layout, item);
+        applyAxisRangesToLayout(layout, item, datasetForDisplay);
         const modalLayout = JSON.parse(JSON.stringify(layout));
         modalLayout.height = 540;
         modalLayout.margin = Object.assign({ l: 60, r: 30, t: 50, b: 50 }, modalLayout.margin || {});
@@ -1436,6 +1756,7 @@
           plotsContainer.textContent = "ラインプロットを生成できませんでした。";
           return;
         }
+        const datasetForDisplay = filterDatasetForDisplay(latestDataset);
         results.forEach((item) => {
           const card = document.createElement("section");
           card.className = "plot-card";
@@ -1463,7 +1784,7 @@
           card.appendChild(plotDiv);
           plotsContainer.appendChild(card);
 
-          const payload = buildPlotPayload(item);
+          const payload = buildPlotPayload(item, datasetForDisplay);
           if (!payload) {
             return;
           }
@@ -1499,6 +1820,17 @@
           }
         });
       }
+      Object.values(pointRangeInputs).forEach((controls) => {
+        if (!controls) {
+          return;
+        }
+        [controls.min, controls.max]
+          .filter(Boolean)
+          .forEach((input) => {
+            input.addEventListener("input", handlePointRangeInput);
+            input.addEventListener("change", handlePointRangeInput);
+          });
+      });
       [modalXAxisMin, modalXAxisMax, modalYAxisMin, modalYAxisMax]
         .filter(Boolean)
         .forEach((input) => {
@@ -1554,6 +1886,7 @@
           latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
           latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];
           latestDataset = result.dataset || null;
+          setPointRangeFromDataset(latestDataset, { force: false });
           renderTableRows(latestSummaries);
           renderLinePlots(latestLineResults);
           applyFixedAxesFromResult(result.fixed_axes);
