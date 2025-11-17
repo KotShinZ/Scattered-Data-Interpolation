@@ -198,6 +198,60 @@
         font-size: 0.95rem;
       }
 
+      .range-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.8rem;
+        margin-top: 0.75rem;
+      }
+
+      .range-grid label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .range-grid input {
+        border-radius: 0.9rem;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        padding: 0.6rem 0.8rem;
+        font-size: 0.95rem;
+      }
+
+      .range-actions {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: flex-start;
+        align-items: center;
+        margin-top: 0.5rem;
+      }
+
+      .settings-cta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .cta-hint {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .modal-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
       .fixed-control {
         border-radius: 20px;
         border: 1px solid rgba(15, 23, 42, 0.08);
@@ -477,8 +531,50 @@
           </div>
         </article>
 
-        <article class="panel range-panel">
-          <h2>元データ表示範囲</h2>
+        <article class="panel settings-cta">
+          <h2>詳細設定</h2>
+          <p>
+            ライン設定・表示レンジ・元データ表示範囲は、下のボタンから開く設定ウインドウでまとめて調整できます。
+          </p>
+          <div class="cta-row">
+            <button id="open-line-settings" type="button">詳細設定を開く</button>
+            <span class="cta-hint">設定変更は再学習なしで反映されます。</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>評価指標とラインチャート</h2>
+        <p>メインビューと同じ RMSE / 滑らかさ指標に加え、各補間手法の 1 次元スライスを折れ線と元データ散布で重ねます。</p>
+        <table id="results-table" aria-live="polite">
+          <thead>
+            <tr>
+              <th>手法</th>
+              <th>滑らかさクラス</th>
+              <th>RMSE</th>
+              <th>勾配滑らかさ</th>
+              <th>ラプラシアン滑らかさ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5">結果はまだ計算されていません。</td></tr>
+          </tbody>
+        </table>
+        <div id="plots-container" aria-live="polite">ラインチャートは結果計算後に表示されます。</div>
+        <div id="skipped" class="skipped" hidden></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="line-settings-backdrop"></div>
+    <div class="modal" id="line-settings-modal" aria-hidden="true">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="line-settings-title">
+        <header>
+          <h3 id="line-settings-title">詳細設定</h3>
+          <button type="button" class="modal-close" id="line-settings-close">閉じる</button>
+        </header>
+
+        <section class="modal-section">
+          <h4>元データ表示範囲</h4>
           <p>
             折れ線グラフと拡大ビューに重ねる元データの散布点を、指定した X/Y/Z の最小値・最大値で絞り込みます。
             データ読み込み時に自動値がセットされ、入力を変更すると即座に反映されます。
@@ -512,11 +608,11 @@
           <div class="hint-box">
             入力を空欄にすると自動設定の値に戻ります。サーフェスビューと同様に、再学習なしで散布点の表示だけを切り替えられます。
           </div>
-        </article>
+        </section>
 
-        <article class="panel">
-          <h2>ライン設定</h2>
-          <p>変化させたい軸と、残り 2 軸の固定値を入力してください。</p>
+        <section class="modal-section">
+          <h4>ライン設定</h4>
+          <p>変化させたい軸と、残り 2 軸の固定値、ライン解像度をまとめて設定できます。</p>
           <div class="control-stack">
             <label for="line-axis">変化させる軸:</label>
             <select id="line-axis">
@@ -553,10 +649,10 @@
               大きな値にすると折れ線が滑らかになります（最大 2000）。値を下げると計算は速くなります。
             </p>
           </div>
-        </article>
+        </section>
 
-        <article class="panel">
-          <h2>表示レンジとズーム</h2>
+        <section class="modal-section">
+          <h4>表示レンジとズーム</h4>
           <p>表示範囲を手動で指定したり、拡大ビューで詳細を確認できます。未入力の軸は自動スケールになります。</p>
           <div class="range-grid">
             <label class="range-input">
@@ -580,29 +676,8 @@
             <button id="apply-range" type="button">表示範囲を適用</button>
             <button id="reset-range" type="button">リセット</button>
           </div>
-        </article>
-      </section>
-
-      <section class="panel">
-        <h2>評価指標とラインチャート</h2>
-        <p>メインビューと同じ RMSE / 滑らかさ指標に加え、各補間手法の 1 次元スライスを折れ線と元データ散布で重ねます。</p>
-        <table id="results-table" aria-live="polite">
-          <thead>
-            <tr>
-              <th>手法</th>
-              <th>滑らかさクラス</th>
-              <th>RMSE</th>
-              <th>勾配滑らかさ</th>
-              <th>ラプラシアン滑らかさ</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td colspan="5">結果はまだ計算されていません。</td></tr>
-          </tbody>
-        </table>
-        <div id="plots-container" aria-live="polite">ラインチャートは結果計算後に表示されます。</div>
-        <div id="skipped" class="skipped" hidden></div>
-      </section>
+        </section>
+      </div>
     </div>
 
     <div class="modal-backdrop" id="modal-backdrop"></div>
@@ -697,6 +772,10 @@
       const modalYAxisLabelMin = document.getElementById("modal-y-label-min");
       const modalYAxisLabelMax = document.getElementById("modal-y-label-max");
       const modalRangeResetButton = document.getElementById("modal-range-reset");
+      const lineSettingsBackdrop = document.getElementById("line-settings-backdrop");
+      const lineSettingsModal = document.getElementById("line-settings-modal");
+      const lineSettingsOpenButton = document.getElementById("open-line-settings");
+      const lineSettingsCloseButton = document.getElementById("line-settings-close");
 
       if (buttonEl) {
         buttonEl.disabled = true;
@@ -1613,6 +1692,26 @@
         return null;
       }
 
+      function openLineSettingsModal() {
+        if (lineSettingsBackdrop) {
+          lineSettingsBackdrop.classList.add("open");
+        }
+        if (lineSettingsModal) {
+          lineSettingsModal.classList.add("open");
+          lineSettingsModal.setAttribute("aria-hidden", "false");
+        }
+      }
+
+      function closeLineSettingsModal() {
+        if (lineSettingsModal) {
+          lineSettingsModal.classList.remove("open");
+          lineSettingsModal.setAttribute("aria-hidden", "true");
+        }
+        if (lineSettingsBackdrop) {
+          lineSettingsBackdrop.classList.remove("open");
+        }
+      }
+
       function renderModalPlot() {
         if (!modalContext || !plotModal || !modalPlotEl || typeof Plotly === "undefined") {
           return;
@@ -1820,6 +1919,22 @@
           }
         });
       }
+      if (lineSettingsOpenButton) {
+        lineSettingsOpenButton.addEventListener("click", openLineSettingsModal);
+      }
+      if (lineSettingsCloseButton) {
+        lineSettingsCloseButton.addEventListener("click", closeLineSettingsModal);
+      }
+      if (lineSettingsBackdrop) {
+        lineSettingsBackdrop.addEventListener("click", closeLineSettingsModal);
+      }
+      if (lineSettingsModal) {
+        lineSettingsModal.addEventListener("click", (event) => {
+          if (event.target === lineSettingsModal) {
+            closeLineSettingsModal();
+          }
+        });
+      }
       Object.values(pointRangeInputs).forEach((controls) => {
         if (!controls) {
           return;
@@ -1847,6 +1962,7 @@
       }
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
+          closeLineSettingsModal();
           closePlotModal();
         }
       });

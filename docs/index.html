@@ -281,14 +281,14 @@
         color: var(--text-muted);
       }
 
-      .range-panel .range-grid {
+      .range-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 0.75rem;
         margin-top: 0.75rem;
       }
 
-      .range-panel label {
+      .range-grid label {
         font-size: 0.85rem;
         font-weight: 600;
         display: flex;
@@ -296,11 +296,35 @@
         gap: 0.3rem;
       }
 
-      .range-panel input {
+      .range-grid input {
         border-radius: 0.9rem;
         border: 1px solid rgba(15, 23, 42, 0.15);
         padding: 0.6rem 0.8rem;
         font-size: 0.95rem;
+      }
+
+      .settings-cta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .cta-row .cta-hint {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .modal-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
       }
 
       .toggle-row {
@@ -584,40 +608,14 @@
           </div>
         </article>
 
-        <article class="panel range-panel">
-          <h2>元データ表示範囲</h2>
+        <article class="panel settings-cta">
+          <h2>詳細設定</h2>
           <p>
-            3D グラフ上に描画する元データの散布点を、指定した X/Y/Z の最小値・最大値でフィルタリングします。
-            データ読み込み時に自動で値が設定され、必要に応じて上書きできます。
+            元データの表示範囲などの詳細な描画オプションは、下のボタンから開ける設定ウインドウでまとめて調整できます。
           </p>
-          <div class="range-grid">
-            <label>
-              <span>X 最小値</span>
-              <input id="range-x-min" type="number" step="any" />
-            </label>
-            <label>
-              <span>X 最大値</span>
-              <input id="range-x-max" type="number" step="any" />
-            </label>
-            <label>
-              <span>Y 最小値</span>
-              <input id="range-y-min" type="number" step="any" />
-            </label>
-            <label>
-              <span>Y 最大値</span>
-              <input id="range-y-max" type="number" step="any" />
-            </label>
-            <label>
-              <span>Z 最小値</span>
-              <input id="range-z-min" type="number" step="any" />
-            </label>
-            <label>
-              <span>Z 最大値</span>
-              <input id="range-z-max" type="number" step="any" />
-            </label>
-          </div>
-          <div class="hint-box">
-            値を変更すると再計算せずに即座に散布点へ反映されます。空欄の場合は自動設定の範囲が使われます。
+          <div class="cta-row">
+            <button id="open-plane-settings" type="button">詳細設定を開く</button>
+            <span class="cta-hint">入力は保存され、再計算なしで描画に反映されます。</span>
           </div>
         </article>
       </section>
@@ -680,6 +678,52 @@
       </div>
     </div>
 
+    <div class="modal-backdrop" id="plane-settings-backdrop"></div>
+    <div class="modal-window" id="plane-settings-modal" aria-hidden="true">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="plane-settings-title">
+        <header>
+          <h3 id="plane-settings-title">詳細設定</h3>
+          <button type="button" class="modal-close" id="plane-settings-close">閉じる</button>
+        </header>
+        <section class="modal-section">
+          <h4>元データ表示範囲</h4>
+          <p>
+            3D グラフ上に描画する元データの散布点を、指定した X/Y/Z の最小値・最大値でフィルタリングします。
+            データ読み込み時に自動で値が設定され、必要に応じて上書きできます。
+          </p>
+          <div class="range-grid">
+            <label>
+              <span>X 最小値</span>
+              <input id="range-x-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>X 最大値</span>
+              <input id="range-x-max" type="number" step="any" />
+            </label>
+            <label>
+              <span>Y 最小値</span>
+              <input id="range-y-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>Y 最大値</span>
+              <input id="range-y-max" type="number" step="any" />
+            </label>
+            <label>
+              <span>Z 最小値</span>
+              <input id="range-z-min" type="number" step="any" />
+            </label>
+            <label>
+              <span>Z 最大値</span>
+              <input id="range-z-max" type="number" step="any" />
+            </label>
+          </div>
+          <div class="hint-box">
+            値を変更すると再計算せずに即座に散布点へ反映されます。空欄の場合は自動設定の範囲が使われます。
+          </div>
+        </section>
+      </div>
+    </div>
+
     <script src="dataset-store.js"></script>
     <script>
       const datasetStore = window.datasetStore || null;
@@ -730,6 +774,10 @@
       const planeModalAxis1Max = document.getElementById("plane-modal-axis1-max");
       const planeModalAxis2Min = document.getElementById("plane-modal-axis2-min");
       const planeModalAxis2Max = document.getElementById("plane-modal-axis2-max");
+      const planeSettingsBackdrop = document.getElementById("plane-settings-backdrop");
+      const planeSettingsModal = document.getElementById("plane-settings-modal");
+      const planeSettingsCloseButton = document.getElementById("plane-settings-close");
+      const planeSettingsOpenButton = document.getElementById("open-plane-settings");
 
       if (buttonEl) {
         buttonEl.disabled = true;
@@ -1553,6 +1601,26 @@
         });
       }
 
+      function openPlaneSettingsModal() {
+        if (planeSettingsBackdrop) {
+          planeSettingsBackdrop.classList.add("open");
+        }
+        if (planeSettingsModal) {
+          planeSettingsModal.classList.add("open");
+          planeSettingsModal.setAttribute("aria-hidden", "false");
+        }
+      }
+
+      function closePlaneSettingsModal() {
+        if (planeSettingsModal) {
+          planeSettingsModal.classList.remove("open");
+          planeSettingsModal.setAttribute("aria-hidden", "true");
+        }
+        if (planeSettingsBackdrop) {
+          planeSettingsBackdrop.classList.remove("open");
+        }
+      }
+
       function openPlaneModal(context) {
         if (!planeModalEl || !planeModalPlotEl || !context) {
           return;
@@ -1871,8 +1939,25 @@
           }
         });
       }
+      if (planeSettingsOpenButton) {
+        planeSettingsOpenButton.addEventListener("click", openPlaneSettingsModal);
+      }
+      if (planeSettingsCloseButton) {
+        planeSettingsCloseButton.addEventListener("click", closePlaneSettingsModal);
+      }
+      if (planeSettingsBackdrop) {
+        planeSettingsBackdrop.addEventListener("click", closePlaneSettingsModal);
+      }
+      if (planeSettingsModal) {
+        planeSettingsModal.addEventListener("click", (event) => {
+          if (event.target === planeSettingsModal) {
+            closePlaneSettingsModal();
+          }
+        });
+      }
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
+          closePlaneSettingsModal();
           closePlaneModal();
         }
       });
