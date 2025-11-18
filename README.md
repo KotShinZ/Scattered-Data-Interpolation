@@ -1,5 +1,7 @@
 # Scattered-Data-Interpolation
 
+**GitHub Pages デモ**: https://kotshinz.github.io/Scattered-Data-Interpolation/
+
 散布データ補間
 
 ## プロジェクト概要
@@ -18,7 +20,7 @@ python src/compare_interpolation.py
 - `output/results_summary.csv`: 各補間法の RMSE、1 次滑らかさ、2 次滑らかさ指標。
 - `output/interpolation_comparison.svg`: 上記指標を可視化した棒グラフ。
 
-コンソールには各手法の要約が表示され、精度と滑らかさを比較できます。
+コンソールには各手法の要約が表示され、精度と滑らかさを比較できます。RMSE は**元データの各点をそのまま予測したときの誤差**として計算するため、薄板スプラインなどの「元データを必ず通る」補間器では 0 に近い値になります。
 
 ## 実装されている補間手法
 

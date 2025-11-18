@@ -859,19 +859,20 @@ def compute_grid_predictions(
 def train_single_interpolator(
     interpolator: Interpolator,
     train: List[Tuple[Point3D, float]],
-    test: List[Tuple[Point3D, float]],
+    *,
     grid_axes: Sequence[Sequence[float]],
     axis_steps: Sequence[float],
     grid_size: int,
+    full_dataset: Sequence[Tuple[Point3D, float]],
 ) -> TrainedMethod:
     train_points = [p for p, _ in train]
     train_values = [v for _, v in train]
     interpolator.fit(train_points, train_values)
 
-    test_points = [p for p, _ in test]
-    test_values = [v for _, v in test]
-    predictions = [interpolator.predict(p) for p in test_points]
-    error = rmse(predictions, test_values)
+    dataset_points = [p for p, _ in full_dataset]
+    dataset_values = [v for _, v in full_dataset]
+    predictions = [interpolator.predict(p) for p in dataset_points]
+    error = rmse(predictions, dataset_values)
 
     grid_points, grid_value_list, grid_values_dict = compute_grid_predictions(
         interpolator, grid_axes
@@ -1146,7 +1147,7 @@ def fit_session(
 
     axis_bounds = compute_axis_bounds([point for point, _ in dataset_list])
     grid_axes, axis_steps = compute_grid_axes(axis_bounds, grid_size)
-    train, test = train_test_split(dataset_list[:], test_ratio=test_ratio)
+    train = dataset_list[:]  # Fit on all points so RMSE reflects original samples
 
     methods: List[TrainedMethod] = []
     skipped: List[Tuple[str, str]] = []
@@ -1155,10 +1156,10 @@ def fit_session(
             trained = train_single_interpolator(
                 interpolator,
                 train[:],
-                test[:],
-                grid_axes,
-                axis_steps,
-                grid_size,
+                grid_axes=grid_axes,
+                axis_steps=axis_steps,
+                grid_size=grid_size,
+                full_dataset=dataset_list,
             )
             methods.append(trained)
         except ValueError as exc:
