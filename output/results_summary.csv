@@ -11,5 +11,20 @@ RBF (multiquadric),C1+ (radial basis),0.000114,0.741044,1.967047
 RBF (inverse_multiquadric),C1+ (radial basis),0.000028,0.737579,2.686527
 Thin-Plate Spline,C1 (thin-plate spline),0.000003,1.151801,5.229170
 Gaussian Process Regression,C2 (squared-exponential kernel),0.000113,0.851131,4.623323
-Ordinary Kriging,C1 (variogram-based),0.000052,0.603752,4.848040
+Ordinary Kriging,C1 (spherical variogram),0.000052,0.603752,4.848040
 Universal Kriging,C1 (trend + variogram),0.000018,9.123646,1.719203
+Exponential Kriging,C∞ (exponential variogram),0.000069,0.468341,2.376149
+Gaussian Kriging,C∞ (gaussian variogram),0.000068,0.861810,5.254910
+Power Kriging,C1 (fractional variogram),0.000127,0.495140,2.755015
+Anisotropic Kriging,C∞ (directional gaussian variogram),0.000069,0.741591,5.424513
+Universal Kriging (quadratic drift),C1 (quadratic trend + residual kriging),0.000029,26.414820,1.559672
+Linear Kriging,C0 (linear variogram),0.000053,0.843602,8.703004
+Cubic Kriging,C2 (cubic variogram),0.000062,0.943020,7.839262
+Rational Quadratic Kriging,C∞ (rational quadratic variogram),0.000103,0.726256,4.378838
+Hole-Effect Kriging,C1 (oscillatory variogram),0.011048,0.806112,1.167696
+Matérn ν=3/2 Kriging,C2 (Matérn 3/2 variogram),0.000086,0.681215,3.921979
+Matérn ν=5/2 Kriging,C4 (Matérn 5/2 variogram),0.000080,0.747212,4.391207
+Logarithmic Kriging,C0 (log variogram),0.000072,0.432165,2.258311
+Cauchy Kriging,C∞ (cauchy variogram),0.000103,0.726256,4.378838
+Stable Kriging,C1 (stable variogram),0.000052,0.817378,8.780612
+Spline Kriging,C2 (thin-plate style variogram),0.000599,0.614137,3.094464

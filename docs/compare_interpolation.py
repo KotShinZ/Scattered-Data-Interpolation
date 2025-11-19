@@ -476,23 +476,176 @@ class GaussianProcessInterpolator(Interpolator):
         return dot(k_star, self.alpha_weights)
 
 
-class OrdinaryKrigingInterpolator(Interpolator):
-    name = "Ordinary Kriging"
-    smoothness_class = "C1 (variogram-based)"
+def spherical_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h <= 0.0:
+            return 0.0
+        if h >= range_param:
+            return sill
+        ratio = h / range_param
+        return sill * (1.5 * ratio - 0.5 * ratio ** 3)
 
-    def __init__(self, sill: float = 1.0, range_param: float = 0.5, nugget: float = 1e-4) -> None:
-        self.sill = sill
-        self.range_param = range_param
+    return _variogram
+
+
+def exponential_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h <= 0.0:
+            return 0.0
+        ratio = h / range_param
+        return sill * (1.0 - math.exp(-ratio))
+
+    return _variogram
+
+
+def gaussian_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h <= 0.0:
+            return 0.0
+        ratio = h / range_param
+        return sill * (1.0 - math.exp(-(ratio ** 2)))
+
+    return _variogram
+
+
+def power_variogram(sill: float, power: float, scale: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h <= 0.0:
+            return 0.0
+        return sill * ((h / scale) ** power)
+
+    return _variogram
+
+
+def linear_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        ratio = min(max(h / range_param, 0.0), 1.0)
+        return sill * ratio
+
+    return _variogram
+
+
+def cubic_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        t = min(max(h / range_param, 0.0), 1.0)
+        value = (7 * (t ** 2) - 8 * (t ** 3) + 3 * (t ** 4)) / 2.0
+        return sill * value if h < range_param else sill
+
+    return _variogram
+
+
+def rational_quadratic_variogram(
+    sill: float, range_param: float, alpha: float = 1.0
+) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        ratio = h / range_param
+        return sill * ((ratio ** 2) / (alpha + (ratio ** 2)))
+
+    return _variogram
+
+
+def hole_effect_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h == 0:
+            return 0.0
+        if range_param <= 0:
+            return sill
+        scaled = h / range_param
+        return sill * (1.0 - math.sin(scaled) / scaled)
+
+    return _variogram
+
+
+def matern_variogram(sill: float, range_param: float, nu: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        if h == 0:
+            return 0.0
+        r = h / range_param
+        if nu == 1.5:
+            coef = math.sqrt(3.0)
+            return sill * (1.0 - (1.0 + coef * r) * math.exp(-coef * r))
+        if nu == 2.5:
+            coef = math.sqrt(5.0)
+            return sill * (
+                1.0
+                - (
+                    1.0
+                    + coef * r
+                    + 5.0 * (r ** 2) / 3.0
+                )
+                * math.exp(-coef * r)
+            )
+        return sill * (1.0 - math.exp(-r))
+
+    return _variogram
+
+
+def logarithmic_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill * math.log1p(h)
+        return sill * math.log1p(h / range_param)
+
+    return _variogram
+
+
+def cauchy_variogram(sill: float, range_param: float) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        ratio = h / range_param
+        return sill * (1.0 - 1.0 / (1.0 + ratio * ratio))
+
+    return _variogram
+
+
+def stable_variogram(
+    sill: float, range_param: float, alpha: float = 1.2
+) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if range_param <= 0:
+            return sill
+        ratio = (h / range_param) ** max(min(alpha, 2.0), 0.2)
+        return min(sill, sill * ratio)
+
+    return _variogram
+
+
+def spline_variogram(sill: float, scale: float = 1.0) -> Callable[[float], float]:
+    def _variogram(h: float) -> float:
+        if h == 0:
+            return 0.0
+        return sill * (h ** 2) * math.log1p(h / max(scale, 1e-6))
+
+    return _variogram
+
+
+class BaseVariogramKriging(Interpolator):
+    def __init__(
+        self,
+        *,
+        name: str,
+        variogram_fn: Callable[[float], float],
+        smoothness: str = "C1 (variogram-based)",
+        nugget: float = 1e-4,
+    ) -> None:
+        self.name = name
+        self.smoothness_class = smoothness
+        self.variogram_fn = variogram_fn
         self.nugget = nugget
         self.points: List[Point3D] = []
         self.values: List[float] = []
 
-    def _variogram(self, h: float) -> float:
-        # Spherical variogram model
-        if h >= self.range_param:
-            return self.sill
-        ratio = h / self.range_param
-        return self.sill * (1.5 * ratio - 0.5 * ratio ** 3)
+    def _distance(self, a: Point3D, b: Point3D) -> float:
+        return math.dist(a, b)
 
     def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
         self.points = list(points)
@@ -506,18 +659,83 @@ class OrdinaryKrigingInterpolator(Interpolator):
         rhs = [0.0 for _ in range(n + 1)]
         for i in range(n):
             for j in range(n):
-                h = math.dist(self.points[i], self.points[j])
-                matrix[i][j] = self._variogram(h)
+                h = self._distance(self.points[i], self.points[j])
+                matrix[i][j] = self.variogram_fn(h)
             matrix[i][i] += self.nugget
             matrix[i][n] = 1.0
             matrix[n][i] = 1.0
         matrix[n][n] = 0.0
         for i in range(n):
-            rhs[i] = self._variogram(math.dist(point, self.points[i]))
+            rhs[i] = self.variogram_fn(self._distance(point, self.points[i]))
         rhs[n] = 1.0
         solution = solve_linear_system(matrix, rhs)
         weights = solution[:n]
         return sum(w * v for w, v in zip(weights, self.values))
+
+
+class OrdinaryKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.5, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Ordinary Kriging",
+            smoothness="C1 (spherical variogram)",
+            variogram_fn=spherical_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class ExponentialKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.45, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Exponential Kriging",
+            smoothness="C\u221e (exponential variogram)",
+            variogram_fn=exponential_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class GaussianKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.4, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Gaussian Kriging",
+            smoothness="C\u221e (gaussian variogram)",
+            variogram_fn=gaussian_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class PowerKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, power: float = 1.5, scale: float = 0.5, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Power Kriging",
+            smoothness="C1 (fractional variogram)",
+            variogram_fn=power_variogram(sill, power, scale),
+            nugget=nugget,
+        )
+
+
+class AnisotropicKrigingInterpolator(BaseVariogramKriging):
+    def __init__(
+        self,
+        ranges: Tuple[float, float, float] = (0.4, 0.25, 0.6),
+        sill: float = 1.0,
+        nugget: float = 1e-4,
+    ) -> None:
+        super().__init__(
+            name="Anisotropic Kriging",
+            smoothness="C\u221e (directional gaussian variogram)",
+            variogram_fn=gaussian_variogram(sill, range_param=1.0),
+            nugget=nugget,
+        )
+        self.axis_ranges = ranges
+
+    def _distance(self, a: Point3D, b: Point3D) -> float:
+        if not self.axis_ranges:
+            return math.dist(a, b)
+        scales = self.axis_ranges
+        dx = (a[0] - b[0]) / scales[0]
+        dy = (a[1] - b[1]) / scales[1]
+        dz = (a[2] - b[2]) / scales[2]
+        return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 class UniversalKrigingInterpolator(Interpolator):
@@ -537,6 +755,153 @@ class UniversalKrigingInterpolator(Interpolator):
 
     def predict(self, point: Point3D) -> float:
         return self.trend_model.predict(point) + self.base.predict(point)
+
+
+class QuadraticTrendInterpolator(LinearRegressionInterpolator):
+    def _design_row(self, point: Point3D) -> List[float]:
+        x, y, z = point
+        return [
+            1.0,
+            x,
+            y,
+            z,
+            x * y,
+            y * z,
+            z * x,
+            x * x,
+            y * y,
+            z * z,
+        ]
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        design = [self._design_row(p) for p in points]
+        if not design:
+            self.coefficients = []
+            return
+        design_t = transpose(design)
+        normal_matrix = matmul(design_t, design)
+        # Add a small ridge term to avoid singular matrices on tiny datasets.
+        for i in range(len(normal_matrix)):
+            normal_matrix[i][i] += 1e-6
+        normal_rhs = matvec(design_t, values)
+        self.coefficients = solve_linear_system(normal_matrix, normal_rhs)
+
+
+class QuadraticDriftKrigingInterpolator(Interpolator):
+    name = "Universal Kriging (quadratic drift)"
+    smoothness_class = "C1 (quadratic trend + residual kriging)"
+
+    def __init__(self) -> None:
+        self.trend_model = QuadraticTrendInterpolator()
+        self.residual_model = GaussianKrigingInterpolator(range_param=0.35)
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        self.trend_model.fit(points, values)
+        residuals = [v - self.trend_model.predict(p) for p, v in zip(points, values)]
+        self.residual_model.fit(points, residuals)
+
+    def predict(self, point: Point3D) -> float:
+        return self.trend_model.predict(point) + self.residual_model.predict(point)
+
+
+class LinearKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.5, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Linear Kriging",
+            smoothness="C0 (linear variogram)",
+            variogram_fn=linear_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class CubicKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.6, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Cubic Kriging",
+            smoothness="C2 (cubic variogram)",
+            variogram_fn=cubic_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class RationalQuadraticKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.45, alpha: float = 1.0, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Rational Quadratic Kriging",
+            smoothness="C\u221e (rational quadratic variogram)",
+            variogram_fn=rational_quadratic_variogram(sill, range_param, alpha),
+            nugget=nugget,
+        )
+
+
+class HoleEffectKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.35, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Hole-Effect Kriging",
+            smoothness="C1 (oscillatory variogram)",
+            variogram_fn=hole_effect_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class Matern32KrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.4, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Matérn ν=3/2 Kriging",
+            smoothness="C2 (Matérn 3/2 variogram)",
+            variogram_fn=matern_variogram(sill, range_param, nu=1.5),
+            nugget=nugget,
+        )
+
+
+class Matern52KrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.35, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Matérn ν=5/2 Kriging",
+            smoothness="C4 (Matérn 5/2 variogram)",
+            variogram_fn=matern_variogram(sill, range_param, nu=2.5),
+            nugget=nugget,
+        )
+
+
+class LogarithmicKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.5, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Logarithmic Kriging",
+            smoothness="C0 (log variogram)",
+            variogram_fn=logarithmic_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class CauchyKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.45, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Cauchy Kriging",
+            smoothness="C\u221e (cauchy variogram)",
+            variogram_fn=cauchy_variogram(sill, range_param),
+            nugget=nugget,
+        )
+
+
+class StableKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, range_param: float = 0.4, alpha: float = 1.2, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Stable Kriging",
+            smoothness="C1 (stable variogram)",
+            variogram_fn=stable_variogram(sill, range_param, alpha),
+            nugget=nugget,
+        )
+
+
+class SplineKrigingInterpolator(BaseVariogramKriging):
+    def __init__(self, sill: float = 1.0, scale: float = 0.5, nugget: float = 1e-4) -> None:
+        super().__init__(
+            name="Spline Kriging",
+            smoothness="C2 (thin-plate style variogram)",
+            variogram_fn=spline_variogram(sill, scale),
+            nugget=nugget,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +1186,21 @@ def create_interpolators() -> List[Interpolator]:
         GaussianProcessInterpolator(length_scale=0.35),
         OrdinaryKrigingInterpolator(),
         UniversalKrigingInterpolator(),
+        ExponentialKrigingInterpolator(),
+        GaussianKrigingInterpolator(),
+        PowerKrigingInterpolator(),
+        AnisotropicKrigingInterpolator(),
+        QuadraticDriftKrigingInterpolator(),
+        LinearKrigingInterpolator(),
+        CubicKrigingInterpolator(),
+        RationalQuadraticKrigingInterpolator(),
+        HoleEffectKrigingInterpolator(),
+        Matern32KrigingInterpolator(),
+        Matern52KrigingInterpolator(),
+        LogarithmicKrigingInterpolator(),
+        CauchyKrigingInterpolator(),
+        StableKrigingInterpolator(),
+        SplineKrigingInterpolator(),
     ]
 
 
