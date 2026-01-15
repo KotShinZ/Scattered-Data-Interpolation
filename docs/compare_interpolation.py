@@ -127,30 +127,106 @@ def inverse(a: List[List[float]]) -> List[List[float]]:
 # ---------------------------------------------------------------------------
 
 
+def _smooth_noise_hash(ix: int, iy: int, iz: int, seed: int = 0) -> float:
+    """Generate a pseudo-random value in [0, 1) for a given grid cell."""
+    n = ix + iy * 57 + iz * 131 + seed * 1009
+    n = (n << 13) ^ n
+    return ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF) / 0x7FFFFFFF
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    """Linear interpolation."""
+    return a + t * (b - a)
+
+
+def _smoothstep(t: float) -> float:
+    """Smoothstep function for smooth interpolation (3t^2 - 2t^3)."""
+    return t * t * (3.0 - 2.0 * t)
+
+
+def smooth_noise_3d(x: float, y: float, z: float, seed: int = 0) -> float:
+    """Generate smooth 3D noise using trilinear interpolation of grid values."""
+    ix = int(math.floor(x))
+    iy = int(math.floor(y))
+    iz = int(math.floor(z))
+
+    fx = x - ix
+    fy = y - iy
+    fz = z - iz
+
+    # Smoothstep for smoother transitions
+    sx = _smoothstep(fx)
+    sy = _smoothstep(fy)
+    sz = _smoothstep(fz)
+
+    # Get noise values at 8 corners of the cell
+    n000 = _smooth_noise_hash(ix, iy, iz, seed)
+    n100 = _smooth_noise_hash(ix + 1, iy, iz, seed)
+    n010 = _smooth_noise_hash(ix, iy + 1, iz, seed)
+    n110 = _smooth_noise_hash(ix + 1, iy + 1, iz, seed)
+    n001 = _smooth_noise_hash(ix, iy, iz + 1, seed)
+    n101 = _smooth_noise_hash(ix + 1, iy, iz + 1, seed)
+    n011 = _smooth_noise_hash(ix, iy + 1, iz + 1, seed)
+    n111 = _smooth_noise_hash(ix + 1, iy + 1, iz + 1, seed)
+
+    # Trilinear interpolation
+    nx00 = _lerp(n000, n100, sx)
+    nx10 = _lerp(n010, n110, sx)
+    nx01 = _lerp(n001, n101, sx)
+    nx11 = _lerp(n011, n111, sx)
+
+    nxy0 = _lerp(nx00, nx10, sy)
+    nxy1 = _lerp(nx01, nx11, sy)
+
+    return _lerp(nxy0, nxy1, sz)
+
+
+def fractal_noise_3d(
+    x: float, y: float, z: float, octaves: int = 4, persistence: float = 0.5, seed: int = 0
+) -> float:
+    """Generate fractal noise (fBm) by summing multiple octaves of smooth noise."""
+    total = 0.0
+    amplitude = 1.0
+    frequency = 1.0
+    max_value = 0.0
+
+    for i in range(octaves):
+        total += smooth_noise_3d(x * frequency, y * frequency, z * frequency, seed + i) * amplitude
+        max_value += amplitude
+        amplitude *= persistence
+        frequency *= 2.0
+
+    return total / max_value  # Normalize to [0, 1]
+
+
 def underlying_function(point: Point3D) -> float:
+    """Smooth noise-based underlying function for 3D interpolation testing."""
     x, y, z = point
-    return (
-        math.sin(2 * math.pi * x)
-        + 0.6 * math.sin(2 * math.pi * y)
-        + 0.3 * math.sin(2 * math.pi * z)
-    )
+    # Scale coordinates for interesting variation and use fractal noise
+    scale = 3.0
+    noise_val = fractal_noise_3d(x * scale, y * scale, z * scale, octaves=3, persistence=0.5, seed=42)
+    # Map from [0, 1] to [-1, 1] range for better variation
+    return 2.0 * noise_val - 1.0
 
 
 def generate_dataset(num_points: int, seed: int = 42) -> List[Tuple[Point3D, float]]:
+    """Generate scattered 3D points with smooth noise-based values."""
     random.seed(seed)
     if num_points <= 0:
         return []
 
     data = []
-    max_index = max(1, num_points - 1)
+    # Generate points scattered in [0, 1]^3 space using low-discrepancy-like distribution
     for index in range(num_points):
-        t = index / max_index
-        point = (
-            t,
-            0.5 + 0.5 * math.sin(2 * math.pi * t),
-            0.5 + 0.5 * math.cos(2 * math.pi * t),
-        )
-        noise = random.uniform(-0.01, 0.01)
+        # Use golden ratio based quasi-random sequence for better coverage
+        phi = (1 + math.sqrt(5)) / 2
+        x = (index * phi) % 1.0
+        y = (index * phi * phi) % 1.0
+        z = (index * phi * phi * phi) % 1.0
+
+        point = (x, y, z)
+        # Add very small noise to avoid exact grid alignment
+        noise = random.uniform(-0.005, 0.005)
         value = underlying_function(point) + noise
         data.append((point, value))
     return data
