@@ -480,11 +480,9 @@
         max-height: 90vh;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
         background: #fff;
         border-radius: 32px;
         border: 1px solid rgba(15, 23, 42, 0.08);
-        padding: 1.5rem;
         box-shadow: 0 30px 90px rgba(15, 23, 42, 0.3);
         overflow: hidden;
       }
@@ -494,6 +492,36 @@
         justify-content: space-between;
         align-items: center;
         gap: 1rem;
+        padding: 1.5rem 1.5rem 0.75rem;
+        flex-shrink: 0;
+      }
+
+      .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0.75rem 1.5rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .modal-body::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.05);
+        border-radius: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-thumb {
+        background: rgba(37, 99, 235, 0.3);
+        border-radius: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(37, 99, 235, 0.5);
       }
 
       .modal-content h3 {
@@ -656,6 +684,7 @@
           <h3 id="plane-modal-title">拡大表示</h3>
           <button type="button" class="modal-close" id="plane-modal-close">閉じる</button>
         </header>
+        <div class="modal-body">
         <div class="modal-range-grid" aria-live="polite">
           <label>
             <span id="plane-modal-axis1-label-min">横軸 最小</span>
@@ -675,6 +704,7 @@
           </label>
         </div>
         <div id="plane-modal-plot" class="modal-plot"></div>
+        </div>
       </div>
     </div>
 
@@ -685,6 +715,7 @@
           <h3 id="plane-settings-title">詳細設定</h3>
           <button type="button" class="modal-close" id="plane-settings-close">閉じる</button>
         </header>
+        <div class="modal-body">
         <section class="modal-section">
           <h4>元データ表示範囲</h4>
           <p>
@@ -721,6 +752,7 @@
             値を変更すると再計算せずに即座に散布点へ反映されます。空欄の場合は自動設定の範囲が使われます。
           </div>
         </section>
+        </div>
       </div>
     </div>
 

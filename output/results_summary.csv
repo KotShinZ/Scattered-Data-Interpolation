@@ -28,3 +28,6 @@ Logarithmic Kriging,C0 (log variogram),0.000072,0.432165,2.258311
 Cauchy Kriging,C∞ (cauchy variogram),0.000103,0.726256,4.378838
 Stable Kriging,C1 (stable variogram),0.000052,0.817378,8.780612
 Spline Kriging,C2 (thin-plate style variogram),0.000599,0.614137,3.094464
+Modified Shepard,C1 (local quadratic blending),0.000000,0.566103,4.804539
+MLS (approximating),C-infinity (Gaussian weights),0.300044,0.247559,1.472921
+Interpolating MLS,C1 (singular weights),0.000000,0.938549,11.600721

@@ -905,6 +905,332 @@ class SplineKrigingInterpolator(BaseVariogramKriging):
 
 
 # ---------------------------------------------------------------------------
+# Modified Shepard's Method
+# ---------------------------------------------------------------------------
+
+
+class ModifiedShepardInterpolator(Interpolator):
+    """Modified Quadratic Shepard's Method with local quadratic approximation.
+
+    This addresses the bull's-eye effect and flat spots of classical IDW by:
+    1. Fitting local quadratic surfaces around each data point
+    2. Blending these quadratic functions instead of scalar values
+    """
+
+    name = "Modified Shepard"
+    smoothness_class = "C1 (local quadratic blending)"
+
+    def __init__(self, n_neighbors: int = 9, radius_factor: float = 2.0, power: float = 2.0) -> None:
+        self.n_neighbors = n_neighbors
+        self.radius_factor = radius_factor
+        self.power = power
+        self.points: List[Point3D] = []
+        self.values: List[float] = []
+        self.quadratics: List[Dict[str, float]] = []
+        self.radii: List[float] = []
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        self.points = list(points)
+        self.values = list(values)
+        n = len(self.points)
+
+        # For each data point, fit a local quadratic Q_k(x,y,z)
+        self.quadratics = []
+        self.radii = []
+
+        for k in range(n):
+            # Find k-nearest neighbors
+            distances = []
+            for i in range(n):
+                if i == k:
+                    continue
+                d = math.dist(self.points[k], self.points[i])
+                distances.append((d, i))
+
+            distances.sort()
+            neighbor_count = min(self.n_neighbors, len(distances))
+            neighbor_indices = [idx for _, idx in distances[:neighbor_count]]
+
+            # Determine influence radius
+            if neighbor_count > 0:
+                max_neighbor_dist = max(distances[i][0] for i in range(neighbor_count))
+                radius = max_neighbor_dist * self.radius_factor
+            else:
+                radius = 1.0
+
+            self.radii.append(radius)
+
+            # Build weighted least squares system for quadratic:
+            # Q(x,y,z) = c0 + c1*x + c2*y + c3*z + c4*x^2 + c5*xy + c6*xz + c7*y^2 + c8*yz + c9*z^2
+            # (10 coefficients for 3D quadratic)
+
+            xk, yk, zk = self.points[k]
+            indices_to_use = [k] + neighbor_indices
+
+            # Need at least 10 points for full quadratic, fall back to fewer terms if needed
+            if len(indices_to_use) < 10:
+                # Use simpler model (linear)
+                A = []
+                b = []
+                for idx in indices_to_use:
+                    xi, yi, zi = self.points[idx]
+                    dx, dy, dz = xi - xk, yi - yk, zi - zk
+                    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    weight = math.exp(-dist) if dist > 0 else 1.0
+                    sqrt_w = math.sqrt(weight)
+                    A.append([sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz])
+                    b.append(sqrt_w * self.values[idx])
+
+                if len(A) >= 4:
+                    try:
+                        coeffs = solve_linear_system(
+                            [[sum(A[i][j] * A[i][k] for i in range(len(A))) for k in range(4)] for j in range(4)],
+                            [sum(A[i][j] * b[i] for i in range(len(A))) for j in range(4)]
+                        )
+                        self.quadratics.append({
+                            'c0': coeffs[0], 'c1': coeffs[1], 'c2': coeffs[2], 'c3': coeffs[3],
+                            'c4': 0.0, 'c5': 0.0, 'c6': 0.0, 'c7': 0.0, 'c8': 0.0, 'c9': 0.0,
+                            'xk': xk, 'yk': yk, 'zk': zk
+                        })
+                    except:
+                        # Fallback to constant
+                        self.quadratics.append({
+                            'c0': self.values[k], 'c1': 0.0, 'c2': 0.0, 'c3': 0.0,
+                            'c4': 0.0, 'c5': 0.0, 'c6': 0.0, 'c7': 0.0, 'c8': 0.0, 'c9': 0.0,
+                            'xk': xk, 'yk': yk, 'zk': zk
+                        })
+                else:
+                    self.quadratics.append({
+                        'c0': self.values[k], 'c1': 0.0, 'c2': 0.0, 'c3': 0.0,
+                        'c4': 0.0, 'c5': 0.0, 'c6': 0.0, 'c7': 0.0, 'c8': 0.0, 'c9': 0.0,
+                        'xk': xk, 'yk': yk, 'zk': zk
+                    })
+            else:
+                # Full quadratic fit
+                A = []
+                b = []
+                for idx in indices_to_use:
+                    xi, yi, zi = self.points[idx]
+                    dx, dy, dz = xi - xk, yi - yk, zi - zk
+                    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    weight = math.exp(-dist) if dist > 0 else 1.0
+                    sqrt_w = math.sqrt(weight)
+                    A.append([sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz,
+                             sqrt_w * dx*dx, sqrt_w * dx*dy, sqrt_w * dx*dz,
+                             sqrt_w * dy*dy, sqrt_w * dy*dz, sqrt_w * dz*dz])
+                    b.append(sqrt_w * self.values[idx])
+
+                try:
+                    ATA = [[sum(A[i][j] * A[i][k] for i in range(len(A))) for k in range(10)] for j in range(10)]
+                    ATb = [sum(A[i][j] * b[i] for i in range(len(A))) for j in range(10)]
+                    coeffs = solve_linear_system(ATA, ATb)
+                    self.quadratics.append({
+                        'c0': coeffs[0], 'c1': coeffs[1], 'c2': coeffs[2], 'c3': coeffs[3],
+                        'c4': coeffs[4], 'c5': coeffs[5], 'c6': coeffs[6],
+                        'c7': coeffs[7], 'c8': coeffs[8], 'c9': coeffs[9],
+                        'xk': xk, 'yk': yk, 'zk': zk
+                    })
+                except:
+                    # Fallback
+                    self.quadratics.append({
+                        'c0': self.values[k], 'c1': 0.0, 'c2': 0.0, 'c3': 0.0,
+                        'c4': 0.0, 'c5': 0.0, 'c6': 0.0, 'c7': 0.0, 'c8': 0.0, 'c9': 0.0,
+                        'xk': xk, 'yk': yk, 'zk': zk
+                    })
+
+    def predict(self, point: Point3D) -> float:
+        x, y, z = point
+        numerator = 0.0
+        denominator = 0.0
+
+        for k in range(len(self.points)):
+            dist = math.dist(point, self.points[k])
+
+            # Compact support weight function
+            r = dist / self.radii[k] if self.radii[k] > 0 else 0.0
+            if r >= 1.0:
+                continue  # Outside influence radius
+
+            # Weight: ((1 - r) / r)^p for r < 1
+            if dist < 1e-10:
+                return self.values[k]  # Exact at data points
+
+            w = ((1.0 - r) / max(r, 1e-10)) ** self.power
+
+            # Evaluate local quadratic Q_k(x, y, z)
+            q = self.quadratics[k]
+            dx = x - q['xk']
+            dy = y - q['yk']
+            dz = z - q['zk']
+
+            Q_val = (q['c0'] + q['c1']*dx + q['c2']*dy + q['c3']*dz +
+                    q['c4']*dx*dx + q['c5']*dx*dy + q['c6']*dx*dz +
+                    q['c7']*dy*dy + q['c8']*dy*dz + q['c9']*dz*dz)
+
+            numerator += w * Q_val
+            denominator += w
+
+        if denominator < 1e-10:
+            # No points in range, fall back to nearest
+            nearest_idx = min(range(len(self.points)),
+                            key=lambda i: math.dist(point, self.points[i]))
+            return self.values[nearest_idx]
+
+        return numerator / denominator
+
+
+# ---------------------------------------------------------------------------
+# Moving Least Squares (MLS)
+# ---------------------------------------------------------------------------
+
+
+class MovingLeastSquaresInterpolator(Interpolator):
+    """Moving Least Squares with Gaussian weight function.
+
+    Fits a local polynomial at each query point using weighted least squares.
+    This is an approximating method (does not pass through data points exactly).
+    """
+
+    name = "MLS (approximating)"
+    smoothness_class = "C-infinity (Gaussian weights)"
+
+    def __init__(self, radius: float = 0.5, degree: int = 2) -> None:
+        self.radius = radius
+        self.degree = degree
+        self.points: List[Point3D] = []
+        self.values: List[float] = []
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        self.points = list(points)
+        self.values = list(values)
+
+    def predict(self, point: Point3D) -> float:
+        x0, y0, z0 = point
+
+        # Gaussian weight function
+        weights = []
+        for pt in self.points:
+            dist = math.dist(point, pt)
+            w = math.exp(-(dist / self.radius) ** 2)
+            weights.append(w)
+
+        # Build weighted polynomial system
+        # For degree=1: p(x,y,z) = a0 + a1*dx + a2*dy + a3*dz
+        # For degree=2: add a4*dx^2 + a5*dy^2 + a6*dz^2 + a7*dx*dy + a8*dx*dz + a9*dy*dz
+
+        if self.degree == 1:
+            n_coeffs = 4
+        elif self.degree == 2:
+            n_coeffs = 10
+        else:
+            n_coeffs = 4  # fallback
+
+        A = []
+        b = []
+        for i, pt in enumerate(self.points):
+            xi, yi, zi = pt
+            dx, dy, dz = xi - x0, yi - y0, zi - z0
+            sqrt_w = math.sqrt(weights[i])
+
+            if self.degree == 1:
+                row = [sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz]
+            else:  # degree 2
+                row = [sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz,
+                       sqrt_w * dx*dx, sqrt_w * dy*dy, sqrt_w * dz*dz,
+                       sqrt_w * dx*dy, sqrt_w * dx*dz, sqrt_w * dy*dz]
+
+            A.append(row)
+            b.append(sqrt_w * self.values[i])
+
+        if len(A) < n_coeffs:
+            # Not enough points, fall back to weighted average
+            return sum(w * v for w, v in zip(weights, self.values)) / sum(weights)
+
+        try:
+            ATA = [[sum(A[i][j] * A[i][k] for i in range(len(A)))
+                   for k in range(n_coeffs)] for j in range(n_coeffs)]
+            ATb = [sum(A[i][j] * b[i] for i in range(len(A))) for j in range(n_coeffs)]
+            coeffs = solve_linear_system(ATA, ATb)
+            # Evaluate polynomial at query point (dx=dy=dz=0 for local coord)
+            return coeffs[0]
+        except:
+            return sum(w * v for w, v in zip(weights, self.values)) / sum(weights)
+
+
+class InterpolatingMLSInterpolator(Interpolator):
+    """Interpolating Moving Least Squares with singular weight function.
+
+    Uses w(r) = 1/r^4 to enforce exact interpolation at data points.
+    """
+
+    name = "Interpolating MLS"
+    smoothness_class = "C1 (singular weights)"
+
+    def __init__(self, power: float = 4.0, degree: int = 2) -> None:
+        self.power = power
+        self.degree = degree
+        self.points: List[Point3D] = []
+        self.values: List[float] = []
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        self.points = list(points)
+        self.values = list(values)
+
+    def predict(self, point: Point3D) -> float:
+        x0, y0, z0 = point
+
+        # Check if at data point
+        for i, pt in enumerate(self.points):
+            if math.dist(point, pt) < 1e-10:
+                return self.values[i]
+
+        # Singular weight function: w = 1 / r^power
+        weights = []
+        for pt in self.points:
+            dist = math.dist(point, pt)
+            if dist < 1e-10:
+                return self.values[self.points.index(pt)]
+            w = 1.0 / (dist ** self.power)
+            weights.append(w)
+
+        if self.degree == 1:
+            n_coeffs = 4
+        elif self.degree == 2:
+            n_coeffs = 10
+        else:
+            n_coeffs = 4
+
+        A = []
+        b = []
+        for i, pt in enumerate(self.points):
+            xi, yi, zi = pt
+            dx, dy, dz = xi - x0, yi - y0, zi - z0
+            sqrt_w = math.sqrt(weights[i])
+
+            if self.degree == 1:
+                row = [sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz]
+            else:
+                row = [sqrt_w * 1.0, sqrt_w * dx, sqrt_w * dy, sqrt_w * dz,
+                       sqrt_w * dx*dx, sqrt_w * dy*dy, sqrt_w * dz*dz,
+                       sqrt_w * dx*dy, sqrt_w * dx*dz, sqrt_w * dy*dz]
+
+            A.append(row)
+            b.append(sqrt_w * self.values[i])
+
+        if len(A) < n_coeffs:
+            return sum(w * v for w, v in zip(weights, self.values)) / sum(weights)
+
+        try:
+            ATA = [[sum(A[i][j] * A[i][k] for i in range(len(A)))
+                   for k in range(n_coeffs)] for j in range(n_coeffs)]
+            ATb = [sum(A[i][j] * b[i] for i in range(len(A))) for j in range(n_coeffs)]
+            coeffs = solve_linear_system(ATA, ATb)
+            return coeffs[0]
+        except:
+            return sum(w * v for w, v in zip(weights, self.values)) / sum(weights)
+
+
+# ---------------------------------------------------------------------------
 # Evaluation utilities
 # ---------------------------------------------------------------------------
 
@@ -1201,6 +1527,9 @@ def create_interpolators() -> List[Interpolator]:
         CauchyKrigingInterpolator(),
         StableKrigingInterpolator(),
         SplineKrigingInterpolator(),
+        ModifiedShepardInterpolator(n_neighbors=9),
+        MovingLeastSquaresInterpolator(radius=0.5, degree=2),
+        InterpolatingMLSInterpolator(power=4.0, degree=2),
     ]
 
 
@@ -1517,6 +1846,7 @@ def fit_session(
     seed: int = 123,
     test_ratio: float = 0.2,
     grid_size: int = 6,
+    progress_callback = None,
 ) -> ComparisonSession:
     if dataset is None:
         dataset_list = generate_dataset(num_points, seed=seed)
@@ -1531,7 +1861,14 @@ def fit_session(
 
     methods: List[TrainedMethod] = []
     skipped: List[Tuple[str, str]] = []
-    for interpolator in create_interpolators():
+    interpolators = create_interpolators()
+    total_count = len(interpolators)
+
+    for index, interpolator in enumerate(interpolators):
+        # Report progress
+        if progress_callback:
+            progress_callback(index, total_count, interpolator.name)
+
         try:
             trained = train_single_interpolator(
                 interpolator,
@@ -1782,6 +2119,175 @@ def run_comparison(
         "slice_axis": normalized_axis,
         "slice_value": resolved_slice_value,
     }
+
+
+def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, object]:
+    """
+    Export the active session to a JSON-serializable dictionary.
+    This allows saving the trained session state to localStorage.
+
+    Returns a dict that can be passed to import_session to restore the session.
+    """
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    # Serialize the session data
+    exported = {
+        "dataset": [[list(point), value] for point, value in active_session.dataset],
+        "dataset_source": active_session.dataset_source,
+        "axis_bounds": list(active_session.axis_bounds),
+        "grid_axes": [list(axis) for axis in active_session.grid_axes],
+        "grid_size": active_session.grid_size,
+        "methods": [],
+        "skipped": list(active_session.skipped),
+    }
+
+    # Serialize each trained method
+    for method in active_session.methods:
+        method_data = {
+            "method": method.method,
+            "smoothness_class": method.smoothness_class,
+            "rmse": method.rmse,
+            "gradient_smoothness": method.gradient_smoothness,
+            "laplacian_smoothness": method.laplacian_smoothness,
+            "grid_points": [list(p) for p in method.grid_points],
+            "grid_values": list(method.grid_values),
+            # Serialize interpolator state
+            "interpolator_state": _serialize_interpolator(method.interpolator),
+        }
+        exported["methods"].append(method_data)
+
+    return exported
+
+
+def _serialize_interpolator(interp: Interpolator) -> Dict[str, object]:
+    """Serialize an interpolator's fitted state."""
+    state = {
+        "class_name": interp.__class__.__name__,
+        "name": interp.name,
+        "smoothness_class": interp.smoothness_class,
+    }
+
+    # Store common fitted attributes
+    if hasattr(interp, "points"):
+        state["points"] = [list(p) for p in interp.points] if interp.points else None
+    if hasattr(interp, "values"):
+        state["values"] = list(interp.values) if interp.values else None
+    if hasattr(interp, "weights"):
+        state["weights"] = list(interp.weights) if interp.weights else None
+    if hasattr(interp, "coefficients"):
+        state["coefficients"] = list(interp.coefficients) if interp.coefficients else None
+    if hasattr(interp, "mean_value"):
+        state["mean_value"] = interp.mean_value
+    if hasattr(interp, "variogram_params"):
+        state["variogram_params"] = interp.variogram_params
+    if hasattr(interp, "radii"):
+        state["radii"] = list(interp.radii) if interp.radii else None
+    if hasattr(interp, "quadratics"):
+        state["quadratics"] = list(interp.quadratics) if interp.quadratics else None
+
+    # Store initialization parameters
+    for attr in dir(interp):
+        if not attr.startswith("_") and attr not in ["fit", "predict", "name", "smoothness_class", "points", "values", "weights", "coefficients", "mean_value", "variogram_params", "radii", "quadratics"]:
+            value = getattr(interp, attr, None)
+            if isinstance(value, (int, float, str, bool, type(None))):
+                state[attr] = value
+
+    return state
+
+
+def _deserialize_interpolator(state: Dict[str, object]) -> Interpolator:
+    """Recreate an interpolator from serialized state."""
+    class_name = state.get("class_name")
+
+    # Map class names to constructors
+    interpolators_map = {interp.__class__.__name__: interp.__class__ for interp in create_interpolators()}
+
+    if class_name not in interpolators_map:
+        raise ValueError(f"Unknown interpolator class: {class_name}")
+
+    InterpolatorClass = interpolators_map[class_name]
+
+    # Create instance with default parameters
+    # Extract constructor parameters from state
+    import inspect
+    sig = inspect.signature(InterpolatorClass.__init__)
+    init_params = {}
+    for param_name in sig.parameters:
+        if param_name == "self":
+            continue
+        if param_name in state:
+            init_params[param_name] = state[param_name]
+
+    interp = InterpolatorClass(**init_params)
+
+    # Restore fitted state
+    if "points" in state and state["points"] is not None:
+        interp.points = [tuple(p) for p in state["points"]]
+    if "values" in state and state["values"] is not None:
+        interp.values = list(state["values"])
+    if "weights" in state and state["weights"] is not None:
+        interp.weights = list(state["weights"])
+    if "coefficients" in state and state["coefficients"] is not None:
+        interp.coefficients = list(state["coefficients"])
+    if "mean_value" in state:
+        interp.mean_value = state["mean_value"]
+    if "variogram_params" in state:
+        interp.variogram_params = state["variogram_params"]
+    if "radii" in state and state["radii"] is not None:
+        interp.radii = list(state["radii"])
+    if "quadratics" in state and state["quadratics"] is not None:
+        interp.quadratics = list(state["quadratics"])
+
+    return interp
+
+
+def import_session(exported: Dict[str, object]) -> ComparisonSession:
+    """
+    Import a session from exported data and set it as the active session.
+
+    Args:
+        exported: Dictionary returned by export_session
+
+    Returns:
+        The restored ComparisonSession
+    """
+    global ACTIVE_SESSION
+
+    # Restore dataset
+    dataset = [(tuple(point), value) for point, value in exported["dataset"]]
+
+    # Restore methods
+    methods = []
+    for method_data in exported["methods"]:
+        interpolator = _deserialize_interpolator(method_data["interpolator_state"])
+
+        trained = TrainedMethod(
+            interpolator=interpolator,
+            method=method_data["method"],
+            smoothness_class=method_data["smoothness_class"],
+            rmse=method_data["rmse"],
+            gradient_smoothness=method_data["gradient_smoothness"],
+            laplacian_smoothness=method_data["laplacian_smoothness"],
+            grid_points=[tuple(p) for p in method_data["grid_points"]],
+            grid_values=list(method_data["grid_values"]),
+        )
+        methods.append(trained)
+
+    # Restore session
+    session = ComparisonSession(
+        dataset=dataset,
+        dataset_source=exported["dataset_source"],
+        axis_bounds=[tuple(b) for b in exported["axis_bounds"]],
+        grid_axes=[list(axis) for axis in exported["grid_axes"]],
+        grid_size=exported["grid_size"],
+        methods=methods,
+        skipped=list(exported["skipped"]),
+    )
+
+    ACTIVE_SESSION = session
+    return session
 
 
 def main() -> None:

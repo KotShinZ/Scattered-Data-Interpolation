@@ -46,6 +46,13 @@ async function handleFit(payload) {
   }
   try {
     pyodide.globals.set("PY_DATASET", pyDataset);
+
+    // Set up progress callback in Python
+    pyodide.globals.set("progress_callback", pyodide.toPy((index, total, name) => {
+      const percent = Math.round((index / total) * 100);
+      postStatus(`学習中... (${index}/${total}) ${name}`);
+    }));
+
     await pyodide.runPythonAsync(`from compare_interpolation import fit_session, normalize_dataset
 import json
 
@@ -53,10 +60,13 @@ dataset_candidate = globals().get("PY_DATASET")
 dataset_input = None
 if dataset_candidate is not None:
     dataset_input = normalize_dataset(dataset_candidate)
-fit_session(dataset=dataset_input)`);
+
+progress_cb = globals().get("progress_callback")
+fit_session(dataset=dataset_input, progress_callback=progress_cb)`);
     return { status: "ok" };
   } finally {
     pyodide.globals.set("PY_DATASET", null);
+    pyodide.globals.set("progress_callback", null);
     if (pyDataset && typeof pyDataset.destroy === "function") {
       pyDataset.destroy();
     }
@@ -118,6 +128,35 @@ json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_value
   }
 }
 
+async function handleExportSession() {
+  const pyodide = await ensurePyodide();
+  const resultJson = await pyodide.runPythonAsync(`import json
+from compare_interpolation import export_session
+json.dumps(export_session(), ensure_ascii=False)`);
+  return JSON.parse(resultJson);
+}
+
+async function handleImportSession(payload) {
+  const pyodide = await ensurePyodide();
+  const sessionData = payload && payload.sessionData ? payload.sessionData : null;
+  if (!sessionData) {
+    throw new Error("sessionData is required for import");
+  }
+  let pySessionData = pyodide.toPy(sessionData);
+  try {
+    pyodide.globals.set("PY_SESSION_DATA", pySessionData);
+    await pyodide.runPythonAsync(`from compare_interpolation import import_session
+session_data = globals().get("PY_SESSION_DATA")
+import_session(session_data)`);
+    return { status: "ok" };
+  } finally {
+    pyodide.globals.set("PY_SESSION_DATA", null);
+    if (pySessionData && typeof pySessionData.destroy === "function") {
+      pySessionData.destroy();
+    }
+  }
+}
+
 self.onmessage = async (event) => {
   const { id, type, payload } = event.data || {};
   if (!type) {
@@ -136,6 +175,10 @@ self.onmessage = async (event) => {
       result = await handlePredictPlane(payload || {});
     } else if (type === "predictLine") {
       result = await handlePredictLine(payload || {});
+    } else if (type === "exportSession") {
+      result = await handleExportSession();
+    } else if (type === "importSession") {
+      result = await handleImportSession(payload || {});
     } else {
       throw new Error(`未知の操作: ${type}`);
     }

@@ -423,15 +423,14 @@
 
       .modal-content {
         width: min(1200px, 95vw);
-        height: min(85vh, 720px);
+        max-height: 90vh;
         background: rgba(255, 255, 255, 0.98);
         border-radius: 32px;
         border: 1px solid rgba(15, 23, 42, 0.12);
         box-shadow: 0 25px 90px rgba(15, 23, 42, 0.25);
-        padding: 1.5rem;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        overflow: hidden;
       }
 
       .modal header {
@@ -439,6 +438,36 @@
         justify-content: space-between;
         align-items: center;
         gap: 1rem;
+        padding: 1.5rem 1.5rem 0.75rem;
+        flex-shrink: 0;
+      }
+
+      .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0.75rem 1.5rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .modal-body::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.05);
+        border-radius: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-thumb {
+        background: rgba(37, 99, 235, 0.3);
+        border-radius: 10px;
+      }
+
+      .modal-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(37, 99, 235, 0.5);
       }
 
       .modal h3 {
@@ -525,6 +554,10 @@
             <button id="reset-dataset" type="button">ダミーデータを使用</button>
             <button id="use-saved-dataset" type="button" hidden>保存済みデータを読み込む</button>
           </div>
+          <div class="control-stack" style="margin-top: 1rem;">
+            <button id="save-session" type="button" disabled>学習結果を保存</button>
+            <button id="load-session" type="button" hidden>学習結果を読み込む</button>
+          </div>
           <span id="dataset-label">現在: データ未読み込み</span>
           <div class="hint-box">
             CSV には <code>x,y,z,value</code> の 4 列を含めてください。読み込み完了後に学習し、ボタン押下で predict のみを実行します。
@@ -573,6 +606,7 @@
           <button type="button" class="modal-close" id="line-settings-close">閉じる</button>
         </header>
 
+        <div class="modal-body">
         <section class="modal-section">
           <h4>元データ表示範囲</h4>
           <p>
@@ -677,6 +711,7 @@
             <button id="reset-range" type="button">リセット</button>
           </div>
         </section>
+        </div>
       </div>
     </div>
 
@@ -687,6 +722,7 @@
           <h3 id="modal-title">拡大表示</h3>
           <button type="button" class="modal-close" id="modal-close">閉じる</button>
         </header>
+        <div class="modal-body">
         <div class="modal-range-grid">
           <label>
             <span id="modal-x-label-min">横軸 最小</span>
@@ -709,6 +745,7 @@
           <button type="button" id="modal-range-reset">入力をクリア</button>
         </div>
         <div id="modal-plot"></div>
+        </div>
       </div>
     </div>
 
@@ -1565,6 +1602,92 @@
         });
       }
 
+      // Save/Load session functionality
+      const saveSessionButton = document.getElementById("save-session");
+      const loadSessionButton = document.getElementById("load-session");
+      const SESSION_STORAGE_KEY = "interpolation_trained_session";
+
+      function updateSessionButtonsState() {
+        if (saveSessionButton) {
+          saveSessionButton.disabled = !sessionReady;
+        }
+        if (loadSessionButton) {
+          const hasSavedSession = localStorage.getItem(SESSION_STORAGE_KEY) !== null;
+          loadSessionButton.hidden = !hasSavedSession;
+        }
+      }
+
+      if (saveSessionButton) {
+        saveSessionButton.addEventListener("click", async () => {
+          if (!sessionReady) {
+            statusEl.textContent = "学習が完了していません。";
+            return;
+          }
+          try {
+            statusEl.textContent = "学習結果をエクスポート中...";
+            const exportedData = await callWorker("exportSession", {});
+            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(exportedData));
+            statusEl.textContent = "学習結果を保存しました。";
+            updateSessionButtonsState();
+          } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = "保存に失敗しました: " + message;
+          }
+        });
+      }
+
+      if (loadSessionButton) {
+        loadSessionButton.addEventListener("click", async () => {
+          const savedData = localStorage.getItem(SESSION_STORAGE_KEY);
+          if (!savedData) {
+            statusEl.textContent = "保存済みの学習結果がありません。";
+            return;
+          }
+          try {
+            statusEl.textContent = "学習結果を読み込み中...";
+            const sessionData = JSON.parse(savedData);
+            await pyodideReadyPromise;
+            await callWorker("importSession", { sessionData });
+
+            // Update UI state
+            sessionReady = true;
+            if (buttonEl) {
+              buttonEl.disabled = false;
+            }
+            setAxisControlsDisabled(false);
+
+            // Extract dataset info from imported session
+            if (sessionData.dataset && sessionData.dataset.length > 0) {
+              const points = sessionData.dataset.map(([point, value]) => point);
+              const values = sessionData.dataset.map(([point, value]) => value);
+              latestDataset = { points, values };
+
+              // Set point range from imported bounds
+              if (sessionData.axis_bounds && sessionData.axis_bounds.length === 3) {
+                const [xBounds, yBounds, zBounds] = sessionData.axis_bounds;
+                currentPointRange = {
+                  x: { min: xBounds[0], max: xBounds[1] },
+                  y: { min: yBounds[0], max: yBounds[1] },
+                  z: { min: zBounds[0], max: zBounds[1] },
+                };
+                defaultPointRange = JSON.parse(JSON.stringify(currentPointRange));
+              }
+            }
+
+            statusEl.textContent = "学習結果を読み込みました。ラインを計算ボタンでpredictを実行してください。";
+          } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : String(error);
+            statusEl.textContent = "読み込みに失敗しました: " + message;
+            sessionReady = false;
+          }
+        });
+      }
+
+      // Update button states on page load
+      updateSessionButtonsState();
+
       function renderTableRows(items) {
         if (!tableBody) {
           return;
@@ -2086,6 +2209,7 @@
               buttonEl.disabled = false;
             }
             setAxisControlsDisabled(!sessionReady);
+            updateSessionButtonsState();
             trainingPromise = null;
           }
         })();
