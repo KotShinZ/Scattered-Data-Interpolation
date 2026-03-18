@@ -578,7 +578,8 @@
           </p>
         </div>
         <div class="hero-actions">
-          <button id="run-button">結果を計算</button>
+          <button id="metrics-button" disabled>滑らかさ計算</button>
+          <button id="run-button" disabled>結果を計算</button>
           <p id="status">Pyodideを初期化中...</p>
         </div>
       </header>
@@ -663,11 +664,13 @@
               <th>RMSE</th>
               <th>勾配滑らかさ</th>
               <th>ラプラシアン滑らかさ</th>
+              <th>学習時間 (ms)</th>
+              <th>推論時間/点 (ms)</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td colspan="5">結果はまだ計算されていません。</td>
+              <td colspan="7">結果はまだ計算されていません。</td>
             </tr>
           </tbody>
         </table>
@@ -766,6 +769,7 @@
       ];
       const statusEl = document.getElementById("status");
       const buttonEl = document.getElementById("run-button");
+      const metricsButtonEl = document.getElementById("metrics-button");
       const tableBody = document.querySelector("#results-table tbody");
       const chartContainer = document.getElementById("chart-container");
       const plotsContainer = document.getElementById("plots-container");
@@ -826,6 +830,8 @@
         : false;
       let latestPointSize = defaultPointSize;
       let sessionReady = false;
+      let metricsReady = false;
+      let computingMetrics = false;
       let trainingPromise = null;
       let predicting = false;
       let datasetSource = "none";
@@ -1376,7 +1382,7 @@
         if (!results.length) {
           const row = document.createElement("tr");
           const cell = document.createElement("td");
-          cell.colSpan = 5;
+          cell.colSpan = 7;
           cell.textContent = "有効な結果がありません。";
           row.appendChild(cell);
           tableBody.appendChild(row);
@@ -1390,6 +1396,8 @@
             formatNumber(item.rmse),
             formatNumber(item.gradient_smoothness),
             formatNumber(item.laplacian_smoothness),
+            Number(item.fit_time_ms).toFixed(2),
+            Number(item.predict_time_ms).toFixed(4),
           ];
           for (const value of columns) {
             const cell = document.createElement("td");
@@ -1913,9 +1921,9 @@
         }
         trainingPromise = (async () => {
           sessionReady = false;
-          if (buttonEl) {
-            buttonEl.disabled = true;
-          }
+          metricsReady = false;
+          if (buttonEl) buttonEl.disabled = true;
+          if (metricsButtonEl) metricsButtonEl.disabled = true;
           setAxisControlsDisabled(true);
           clearVisualizations();
           const label = currentDatasetLabel();
@@ -1926,19 +1934,15 @@
               dataset: datasetSource === "custom" ? importedDataset : null,
             });
             sessionReady = true;
-            statusEl.textContent = `${label} の学習が完了しました。結果を計算ボタンでpredictを実行してください。`;
+            statusEl.textContent = `${label} の学習が完了しました。滑らかさ計算ボタンでRMSE・滑らかさを計算できます。`;
           } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : String(error);
             statusEl.textContent = "学習に失敗しました: " + message;
             sessionReady = false;
           } finally {
-            if (!sessionReady && buttonEl) {
-              buttonEl.disabled = true;
-            }
-            if (sessionReady && buttonEl && !predicting) {
-              buttonEl.disabled = false;
-            }
+            if (metricsButtonEl) metricsButtonEl.disabled = !sessionReady;
+            if (buttonEl) buttonEl.disabled = !sessionReady || predicting;
             setAxisControlsDisabled(!sessionReady);
             trainingPromise = null;
           }
@@ -1946,6 +1950,33 @@
         await trainingPromise;
       }
 
+
+      async function runMetricsComputation() {
+        if (!sessionReady || computingMetrics) return;
+        computingMetrics = true;
+        if (metricsButtonEl) metricsButtonEl.disabled = true;
+        if (buttonEl) buttonEl.disabled = true;
+        statusEl.textContent = "滑らかさ計算を開始します...";
+        try {
+          const result = await callWorker("computeMetrics", {});
+          metricsReady = true;
+          const summaries = Array.isArray(result.summaries) ? result.summaries : [];
+          renderTableRows(summaries);
+          statusEl.textContent = "滑らかさ計算が完了しました。結果を計算ボタンでpredictを実行してください。";
+        } catch (error) {
+          console.error(error);
+          const message = error instanceof Error ? error.message : String(error);
+          statusEl.textContent = "滑らかさ計算に失敗しました: " + message;
+        } finally {
+          computingMetrics = false;
+          if (metricsButtonEl) metricsButtonEl.disabled = !sessionReady;
+          if (buttonEl) buttonEl.disabled = !sessionReady || predicting;
+        }
+      }
+
+      if (metricsButtonEl) {
+        metricsButtonEl.addEventListener("click", () => runMetricsComputation());
+      }
 
       [planeModalAxis1Min, planeModalAxis1Max, planeModalAxis2Min, planeModalAxis2Max]
         .filter(Boolean)

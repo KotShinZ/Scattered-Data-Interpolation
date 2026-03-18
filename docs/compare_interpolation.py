@@ -17,7 +17,8 @@ import math
 import os
 import random
 import statistics
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 Point3D = Tuple[float, float, float]
@@ -200,17 +201,24 @@ def fractal_noise_3d(
 
 
 def underlying_function(point: Point3D) -> float:
-    """Smooth noise-based underlying function for 3D interpolation testing."""
+    """Monotonically increasing function with smooth noise perturbation.
+
+    The value increases with x + y + z, with small smooth noise added for variation.
+    """
     x, y, z = point
-    # Scale coordinates for interesting variation and use fractal noise
-    scale = 3.0
-    noise_val = fractal_noise_3d(x * scale, y * scale, z * scale, octaves=3, persistence=0.5, seed=42)
-    # Map from [0, 1] to [-1, 1] range for better variation
-    return 2.0 * noise_val - 1.0
+    # Base monotonic component: increases with sum of coordinates
+    base = (x + y + z) / 3.0  # Normalized to [0, 1] for points in [0,1]^3
+
+    # Add small smooth noise for natural variation (but not enough to break monotonicity)
+    scale = 2.0
+    noise_val = fractal_noise_3d(x * scale, y * scale, z * scale, octaves=2, persistence=0.5, seed=42)
+    noise_contribution = 0.1 * (noise_val - 0.5)  # Small perturbation in [-0.05, 0.05]
+
+    return base + noise_contribution
 
 
 def generate_dataset(num_points: int, seed: int = 42) -> List[Tuple[Point3D, float]]:
-    """Generate scattered 3D points with smooth noise-based values."""
+    """Generate scattered 3D points with monotonically increasing values."""
     random.seed(seed)
     if num_points <= 0:
         return []
@@ -225,7 +233,7 @@ def generate_dataset(num_points: int, seed: int = 42) -> List[Tuple[Point3D, flo
         z = (index * phi * phi * phi) % 1.0
 
         point = (x, y, z)
-        # Add very small noise to avoid exact grid alignment
+        # Add very small noise to the value
         noise = random.uniform(-0.005, 0.005)
         value = underlying_function(point) + noise
         data.append((point, value))
@@ -1432,6 +1440,8 @@ class EvaluationResult:
     slice_axis1_values: List[float]
     slice_axis2_values: List[float]
     slice_matrix: List[List[float]]
+    fit_time_ms: float = 0.0
+    predict_time_ms: float = 0.0
 
 
 @dataclass
@@ -1439,11 +1449,14 @@ class TrainedMethod:
     interpolator: Interpolator
     method: str
     smoothness_class: str
-    rmse: float
-    gradient_smoothness: float
-    laplacian_smoothness: float
-    grid_points: List[Point3D]
-    grid_values: List[float]
+    fit_time_ms: float = 0.0
+    predict_time_ms: float = 0.0
+    rmse: float = 0.0
+    gradient_smoothness: float = 0.0
+    laplacian_smoothness: float = 0.0
+    metrics_computed: bool = False
+    grid_points: List[Point3D] = field(default_factory=list)
+    grid_values: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -1458,6 +1471,8 @@ class LineSliceResult:
     axis_values: List[float]
     predicted_values: List[float]
     fixed_axes: List[Tuple[str, float]]
+    fit_time_ms: float = 0.0
+    predict_time_ms: float = 0.0
 
 
 @dataclass
@@ -1641,50 +1656,65 @@ def compute_grid_predictions(
     return grid_points_list, grid_value_list, grid_values
 
 
-def train_single_interpolator(
+def fit_single_interpolator(
     interpolator: Interpolator,
     train: List[Tuple[Point3D, float]],
-    *,
-    grid_axes: Sequence[Sequence[float]],
-    axis_steps: Sequence[float],
-    grid_size: int,
-    full_dataset: Sequence[Tuple[Point3D, float]],
 ) -> TrainedMethod:
     train_points = [p for p, _ in train]
     train_values = [v for _, v in train]
+    _t0 = time.perf_counter()
     interpolator.fit(train_points, train_values)
+    fit_time_ms = (time.perf_counter() - _t0) * 1000.0
+    return TrainedMethod(
+        interpolator=interpolator,
+        method=getattr(interpolator, "name", interpolator.__class__.__name__),
+        smoothness_class=getattr(interpolator, "smoothness_class", ""),
+        fit_time_ms=fit_time_ms,
+    )
 
+
+def _axis_steps_from_grid(grid_axes: Sequence[Sequence[float]]) -> List[float]:
+    steps = []
+    for axes in grid_axes:
+        if len(axes) > 1:
+            step = (axes[-1] - axes[0]) / (len(axes) - 1)
+        else:
+            step = 1.0
+        steps.append(step if step > 0 else 1.0)
+    return steps
+
+
+def compute_single_method_metrics(
+    trained: TrainedMethod,
+    full_dataset: Sequence[Tuple[Point3D, float]],
+    grid_axes: Sequence[Sequence[float]],
+    axis_steps: Sequence[float],
+    grid_size: int,
+) -> None:
+    interpolator = trained.interpolator
     dataset_points = [p for p, _ in full_dataset]
     dataset_values = [v for _, v in full_dataset]
+
+    _t1 = time.perf_counter()
     predictions = [interpolator.predict(p) for p in dataset_points]
-    error = rmse(predictions, dataset_values)
+    _predict_elapsed_ms = (time.perf_counter() - _t1) * 1000.0
+    trained.predict_time_ms = _predict_elapsed_ms / len(dataset_points) if dataset_points else 0.0
+    trained.rmse = rmse(predictions, dataset_values)
 
     grid_points, grid_value_list, grid_values_dict = compute_grid_predictions(
         interpolator, grid_axes
     )
 
-    step_tuple = (
-        axis_steps[0],
-        axis_steps[1],
-        axis_steps[2],
-    )
-
+    step_tuple = (axis_steps[0], axis_steps[1], axis_steps[2])
     gradients = finite_difference_gradients(grid_values_dict, grid_size, step_tuple)
-    gradient_smoothness = smoothness_metric_from_vectors(gradients)
+    trained.gradient_smoothness = smoothness_metric_from_vectors(gradients)
 
     laplacians = finite_difference_laplacian(grid_values_dict, grid_size, step_tuple)
-    laplacian_smoothness = smoothness_metric_from_scalars(laplacians)
+    trained.laplacian_smoothness = smoothness_metric_from_scalars(laplacians)
 
-    return TrainedMethod(
-        interpolator=interpolator,
-        method=getattr(interpolator, "name", interpolator.__class__.__name__),
-        smoothness_class=getattr(interpolator, "smoothness_class", ""),
-        rmse=error,
-        gradient_smoothness=gradient_smoothness,
-        laplacian_smoothness=laplacian_smoothness,
-        grid_points=grid_points,
-        grid_values=grid_value_list,
-    )
+    trained.grid_points = grid_points
+    trained.grid_values = grid_value_list
+    trained.metrics_computed = True
 
 
 def build_dataset_payload(
@@ -1710,6 +1740,8 @@ def serialize_results(results: List[EvaluationResult]) -> List[Dict[str, object]
                 "rmse": item.rmse,
                 "gradient_smoothness": item.gradient_smoothness,
                 "laplacian_smoothness": item.laplacian_smoothness,
+                "fit_time_ms": item.fit_time_ms,
+                "predict_time_ms": item.predict_time_ms,
                 "grid_points": [list(point) for point in item.grid_points],
                 "grid_values": item.grid_values[:],
                 "slice": {
@@ -1737,6 +1769,8 @@ def serialize_method_summaries(methods: Sequence[TrainedMethod]) -> List[Dict[st
                 "rmse": method.rmse,
                 "gradient_smoothness": method.gradient_smoothness,
                 "laplacian_smoothness": method.laplacian_smoothness,
+                "fit_time_ms": method.fit_time_ms,
+                "predict_time_ms": method.predict_time_ms,
             }
         )
     return payload
@@ -1754,6 +1788,8 @@ def serialize_line_results(results: List[LineSliceResult]) -> List[Dict[str, obj
                 "axis_values": item.axis_values[:],
                 "predicted_values": item.predicted_values[:],
                 "fixed_axes": [[label, value] for label, value in item.fixed_axes],
+                "fit_time_ms": item.fit_time_ms,
+                "predict_time_ms": item.predict_time_ms,
             }
         )
     return payload
@@ -1825,6 +1861,8 @@ def compute_prediction(
                 slice_axis1_values=axis1_values,
                 slice_axis2_values=axis2_values,
                 slice_matrix=slice_matrix,
+                fit_time_ms=method.fit_time_ms,
+                predict_time_ms=method.predict_time_ms,
             )
         )
 
@@ -1909,6 +1947,8 @@ def compute_line_predictions(
                 axis_values=axis_values[:],
                 predicted_values=predicted_values,
                 fixed_axes=fixed_axes_info,
+                fit_time_ms=method.fit_time_ms,
+                predict_time_ms=method.predict_time_ms,
             )
         )
 
@@ -1946,14 +1986,7 @@ def fit_session(
             progress_callback(index, total_count, interpolator.name)
 
         try:
-            trained = train_single_interpolator(
-                interpolator,
-                train[:],
-                grid_axes=grid_axes,
-                axis_steps=axis_steps,
-                grid_size=grid_size,
-                full_dataset=dataset_list,
-            )
+            trained = fit_single_interpolator(interpolator, train[:])
             methods.append(trained)
         except ValueError as exc:
             skipped.append((interpolator.name, str(exc)))
@@ -1971,6 +2004,35 @@ def fit_session(
     global ACTIVE_SESSION
     ACTIVE_SESSION = session
     return session
+
+
+def compute_metrics_session(
+    session: Optional[ComparisonSession] = None,
+    progress_callback=None,
+) -> Dict[str, object]:
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    axis_steps = _axis_steps_from_grid(active_session.grid_axes)
+    total_count = len(active_session.methods)
+
+    for index, method in enumerate(active_session.methods):
+        if progress_callback:
+            progress_callback(index, total_count, method.method)
+        compute_single_method_metrics(
+            method,
+            active_session.dataset,
+            active_session.grid_axes,
+            axis_steps,
+            active_session.grid_size,
+        )
+
+    return {
+        "status": "ok",
+        "summaries": serialize_method_summaries(active_session.methods),
+        "skipped": active_session.skipped,
+    }
 
 
 def predict_session(
@@ -2227,6 +2289,9 @@ def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, obj
             "rmse": method.rmse,
             "gradient_smoothness": method.gradient_smoothness,
             "laplacian_smoothness": method.laplacian_smoothness,
+            "fit_time_ms": method.fit_time_ms,
+            "predict_time_ms": method.predict_time_ms,
+            "metrics_computed": method.metrics_computed,
             "grid_points": [list(p) for p in method.grid_points],
             "grid_values": list(method.grid_values),
             # Serialize interpolator state
@@ -2346,6 +2411,9 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
             rmse=method_data["rmse"],
             gradient_smoothness=method_data["gradient_smoothness"],
             laplacian_smoothness=method_data["laplacian_smoothness"],
+            fit_time_ms=method_data.get("fit_time_ms", 0.0),
+            predict_time_ms=method_data.get("predict_time_ms", 0.0),
+            metrics_computed=method_data.get("metrics_computed", bool(method_data["grid_points"])),
             grid_points=[tuple(p) for p in method_data["grid_points"]],
             grid_values=list(method_data["grid_values"]),
         )

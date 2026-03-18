@@ -128,6 +128,22 @@ json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_value
   }
 }
 
+async function handleComputeMetrics() {
+  const pyodide = await ensurePyodide();
+  pyodide.globals.set("metrics_progress_callback", pyodide.toPy((index, total, name) => {
+    postStatus(`滑らかさ計算中... (${index}/${total}) ${name}`);
+  }));
+  try {
+    const resultJson = await pyodide.runPythonAsync(`import json
+from compare_interpolation import compute_metrics_session
+cb = globals().get("metrics_progress_callback")
+json.dumps(compute_metrics_session(progress_callback=cb), ensure_ascii=False)`);
+    return JSON.parse(resultJson);
+  } finally {
+    pyodide.globals.set("metrics_progress_callback", null);
+  }
+}
+
 async function handleExportSession() {
   const pyodide = await ensurePyodide();
   const resultJson = await pyodide.runPythonAsync(`import json
@@ -175,6 +191,8 @@ self.onmessage = async (event) => {
       result = await handlePredictPlane(payload || {});
     } else if (type === "predictLine") {
       result = await handlePredictLine(payload || {});
+    } else if (type === "computeMetrics") {
+      result = await handleComputeMetrics();
     } else if (type === "exportSession") {
       result = await handleExportSession();
     } else if (type === "importSession") {

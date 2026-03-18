@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(timeout 60 python:*)"
+      "Bash(timeout 60 python:*)",
+      "Bash(chmod +x \"j:\\\\マイドライブ\\\\大学用\\\\バイト\\\\プロジェクト\\\\散布データ補間_小谷真士_BGA25010\\\\Scattered-Data-Interpolation\\\\serve.sh\")"
     ],
     "deny": [],
     "ask": []
