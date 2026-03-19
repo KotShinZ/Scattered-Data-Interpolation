@@ -2335,7 +2335,7 @@
           buttonEl.disabled = true;
         }
         setAxisControlsDisabled(true);
-        statusEl.textContent = "Python計算を実行中 (predictのみ)...";
+        statusEl.textContent = "結果を計算中...";
         try {
           await pyodideReadyPromise;
           const axis = lineAxisSelect ? lineAxisSelect.value || "z" : "z";

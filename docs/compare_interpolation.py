@@ -1923,16 +1923,11 @@ def fit_single_interpolator(
     _t0 = time.perf_counter()
     interpolator.fit(train_points, train_values)
     fit_time_ms = (time.perf_counter() - _t0) * 1000.0
-    _t1 = time.perf_counter()
-    for p in train_points:
-        interpolator.predict(p)
-    predict_time_ms = (time.perf_counter() - _t1) * 1000.0 / len(train_points) if train_points else 0.0
     return TrainedMethod(
         interpolator=interpolator,
         method=getattr(interpolator, "name", interpolator.__class__.__name__),
         smoothness_class=getattr(interpolator, "smoothness_class", ""),
         fit_time_ms=fit_time_ms,
-        predict_time_ms=predict_time_ms,
     )
 
 
@@ -2062,6 +2057,7 @@ def compute_prediction(
     session: ComparisonSession,
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
+    progress_callback=None,
 ) -> Tuple[List[EvaluationResult], str, float]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (slice_axis or "z").lower()
@@ -2095,8 +2091,13 @@ def compute_prediction(
     axis2_values = session.grid_axes[axis2_index][:]
 
     results: List[EvaluationResult] = []
-    for method in session.methods:
+    total_count = len(session.methods)
+    for method_index, method in enumerate(session.methods):
+        if progress_callback:
+            progress_callback(method_index, total_count, method.method)
         slice_matrix: List[List[float]] = []
+        predict_count = 0
+        _tp = time.perf_counter()
         for axis2 in axis2_values:
             row: List[float] = []
             for axis1 in axis1_values:
@@ -2105,7 +2106,10 @@ def compute_prediction(
                 coords[axis2_index] = axis2
                 coords[drop_index] = resolved_slice_value
                 row.append(method.interpolator.predict(tuple(coords)))
+                predict_count += 1
             slice_matrix.append(row)
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / predict_count if predict_count else 0.0
+        method.predict_time_ms = predict_time_ms
 
         results.append(
             EvaluationResult(
@@ -2125,7 +2129,93 @@ def compute_prediction(
                 slice_axis2_values=axis2_values,
                 slice_matrix=slice_matrix,
                 fit_time_ms=method.fit_time_ms,
-                predict_time_ms=method.predict_time_ms,
+                predict_time_ms=predict_time_ms,
+            )
+        )
+
+    return results, normalized_axis, resolved_slice_value
+
+
+async def compute_prediction_async(
+    session: ComparisonSession,
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
+    progress_callback=None,
+) -> Tuple[List[EvaluationResult], str, float]:
+    import asyncio
+
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    normalized_axis = (slice_axis or "z").lower()
+    drop_index = axis_lookup.get(normalized_axis, 2)
+    axis_values = session.grid_axes[drop_index][:]
+    if axis_values:
+        default_slice_value = axis_values[len(axis_values) // 2]
+        min_bound = axis_values[0]
+        max_bound = axis_values[-1]
+    else:
+        default_slice_value = 0.0
+        min_bound = 0.0
+        max_bound = 1.0
+
+    if (
+        slice_value is not None
+        and isinstance(slice_value, (int, float))
+        and math.isfinite(slice_value)
+    ):
+        candidate = float(slice_value)
+        if min_bound <= max_bound:
+            resolved_slice_value = max(min(candidate, max_bound), min_bound)
+        else:
+            resolved_slice_value = candidate
+    else:
+        resolved_slice_value = default_slice_value
+
+    keep_indices = [index for index in range(3) if index != drop_index]
+    axis1_index, axis2_index = keep_indices
+    axis1_values = session.grid_axes[axis1_index][:]
+    axis2_values = session.grid_axes[axis2_index][:]
+
+    results: List[EvaluationResult] = []
+    total_count = len(session.methods)
+    for method_index, method in enumerate(session.methods):
+        if progress_callback:
+            progress_callback(method_index, total_count, method.method)
+        await asyncio.sleep(0.02)
+        slice_matrix: List[List[float]] = []
+        predict_count = 0
+        _tp = time.perf_counter()
+        for axis2 in axis2_values:
+            row: List[float] = []
+            for axis1 in axis1_values:
+                coords = [0.0, 0.0, 0.0]
+                coords[axis1_index] = axis1
+                coords[axis2_index] = axis2
+                coords[drop_index] = resolved_slice_value
+                row.append(method.interpolator.predict(tuple(coords)))
+                predict_count += 1
+            slice_matrix.append(row)
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / predict_count if predict_count else 0.0
+        method.predict_time_ms = predict_time_ms
+
+        results.append(
+            EvaluationResult(
+                method=method.method,
+                smoothness_class=method.smoothness_class,
+                rmse=method.rmse,
+                gradient_smoothness=method.gradient_smoothness,
+                laplacian_smoothness=method.laplacian_smoothness,
+                grid_points=method.grid_points,
+                grid_values=method.grid_values,
+                slice_axis=AXIS_LABELS[drop_index],
+                slice_value=resolved_slice_value,
+                slice_axis1_label=AXIS_LABELS[axis1_index],
+                slice_axis2_label=AXIS_LABELS[axis2_index],
+                slice_fixed_label=AXIS_LABELS[drop_index],
+                slice_axis1_values=axis1_values,
+                slice_axis2_values=axis2_values,
+                slice_matrix=slice_matrix,
+                fit_time_ms=method.fit_time_ms,
+                predict_time_ms=predict_time_ms,
             )
         )
 
@@ -2147,6 +2237,7 @@ def compute_line_predictions(
     varying_axis: str = "z",
     fixed_values: Optional[Dict[str, float]] = None,
     line_resolution: Optional[int] = None,
+    progress_callback=None,
 ) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (varying_axis or "z").lower()
@@ -2185,12 +2276,18 @@ def compute_line_predictions(
         resolved_fixed[label_lower] = candidate
 
     results: List[LineSliceResult] = []
-    for method in session.methods:
+    total_count = len(session.methods)
+    for method_index, method in enumerate(session.methods):
+        if progress_callback:
+            progress_callback(method_index, total_count, method.method)
         predicted_values: List[float] = []
+        _tp = time.perf_counter()
         for axis_value in axis_values:
             coords = coords_template[:]
             coords[varying_index] = axis_value
             predicted_values.append(method.interpolator.predict(tuple(coords)))
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values) if axis_values else 0.0
+        method.predict_time_ms = predict_time_ms
 
         fixed_axes_info = [
             (label, resolved_fixed[label.lower()])
@@ -2211,7 +2308,93 @@ def compute_line_predictions(
                 predicted_values=predicted_values,
                 fixed_axes=fixed_axes_info,
                 fit_time_ms=method.fit_time_ms,
-                predict_time_ms=method.predict_time_ms,
+                predict_time_ms=predict_time_ms,
+            )
+        )
+
+    return results, normalized_axis, resolved_fixed, effective_resolution
+
+
+async def compute_line_predictions_async(
+    session: ComparisonSession,
+    varying_axis: str = "z",
+    fixed_values: Optional[Dict[str, float]] = None,
+    line_resolution: Optional[int] = None,
+    progress_callback=None,
+) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
+    import asyncio
+
+    axis_lookup = {"x": 0, "y": 1, "z": 2}
+    normalized_axis = (varying_axis or "z").lower()
+    varying_index = axis_lookup.get(normalized_axis, 2)
+
+    lower, upper = session.axis_bounds[varying_index]
+    sanitized_resolution = _sanitize_line_resolution(line_resolution)
+    effective_resolution = max(session.grid_size, sanitized_resolution)
+    axis_values, _ = create_grid(effective_resolution, lower, upper)
+
+    normalized_fixed_input: Dict[str, float] = {}
+    if isinstance(fixed_values, dict):
+        for key, value in fixed_values.items():
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                normalized_fixed_input[key.lower()] = float(value)
+
+    resolved_fixed: Dict[str, float] = {}
+    coords_template = [0.0, 0.0, 0.0]
+    for axis_index, axis_label in enumerate(AXIS_LABELS):
+        label_lower = axis_label.lower()
+        if axis_index == varying_index:
+            continue
+        candidate = normalized_fixed_input.get(label_lower)
+        lower, upper = session.axis_bounds[axis_index]
+        min_bound = min(lower, upper)
+        max_bound = max(lower, upper)
+        if candidate is None:
+            axis_entries = session.grid_axes[axis_index]
+            if axis_entries:
+                candidate = axis_entries[len(axis_entries) // 2]
+            else:
+                candidate = (lower + upper) / 2.0
+        else:
+            candidate = max(min(candidate, max_bound), min_bound)
+        coords_template[axis_index] = candidate
+        resolved_fixed[label_lower] = candidate
+
+    results: List[LineSliceResult] = []
+    total_count = len(session.methods)
+    for method_index, method in enumerate(session.methods):
+        if progress_callback:
+            progress_callback(method_index, total_count, method.method)
+        await asyncio.sleep(0.02)
+        predicted_values: List[float] = []
+        _tp = time.perf_counter()
+        for axis_value in axis_values:
+            coords = coords_template[:]
+            coords[varying_index] = axis_value
+            predicted_values.append(method.interpolator.predict(tuple(coords)))
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values) if axis_values else 0.0
+        method.predict_time_ms = predict_time_ms
+
+        fixed_axes_info = [
+            (label, resolved_fixed[label.lower()])
+            for label in AXIS_LABELS
+            if label.lower() in resolved_fixed
+        ]
+
+        results.append(
+            LineSliceResult(
+                method=method.method,
+                smoothness_class=method.smoothness_class,
+                rmse=method.rmse,
+                gradient_smoothness=method.gradient_smoothness,
+                laplacian_smoothness=method.laplacian_smoothness,
+                varying_axis_label=AXIS_LABELS[varying_index],
+                varying_axis=AXIS_LABELS[varying_index],
+                axis_values=axis_values[:],
+                predicted_values=predicted_values,
+                fixed_axes=fixed_axes_info,
+                fit_time_ms=method.fit_time_ms,
+                predict_time_ms=predict_time_ms,
             )
         )
 
@@ -2316,13 +2499,14 @@ def predict_session(
     slice_value: Optional[float] = None,
     *,
     session: Optional[ComparisonSession] = None,
+    progress_callback=None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
     results, normalized_axis, resolved_value = compute_prediction(
-        active_session, slice_axis, slice_value
+        active_session, slice_axis, slice_value, progress_callback=progress_callback
     )
 
     dataset_payload = build_dataset_payload(
@@ -2349,6 +2533,7 @@ def predict_line_session(
     line_resolution: Optional[int] = None,
     *,
     session: Optional[ComparisonSession] = None,
+    progress_callback=None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
@@ -2364,6 +2549,83 @@ def predict_line_session(
         varying_axis,
         fixed_values,
         line_resolution=line_resolution,
+        progress_callback=progress_callback,
+    )
+
+    dataset_payload = build_dataset_payload(
+        active_session.dataset,
+        active_session.dataset_source,
+        active_session.axis_bounds,
+    )
+
+    return {
+        "line_results": serialize_line_results(line_results),
+        "dataset": dataset_payload,
+        "dataset_source": active_session.dataset_source,
+        "skipped": active_session.skipped,
+        "line_axis": normalized_axis,
+        "fixed_axes": resolved_fixed,
+        "summaries": serialize_method_summaries(active_session.methods),
+        "line_resolution": resolved_resolution,
+    }
+
+
+async def predict_session_async(
+    slice_axis: str = "z",
+    slice_value: Optional[float] = None,
+    *,
+    session: Optional[ComparisonSession] = None,
+    progress_callback=None,
+) -> Dict[str, object]:
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    results, normalized_axis, resolved_value = await compute_prediction_async(
+        active_session, slice_axis, slice_value, progress_callback=progress_callback
+    )
+
+    dataset_payload = build_dataset_payload(
+        active_session.dataset,
+        active_session.dataset_source,
+        active_session.axis_bounds,
+    )
+    svg_content = render_bar_chart_svg_string(results) if results else ""
+
+    return {
+        "results": serialize_results(results),
+        "svg": svg_content,
+        "dataset": dataset_payload,
+        "skipped": active_session.skipped,
+        "dataset_source": active_session.dataset_source,
+        "slice_axis": normalized_axis,
+        "slice_value": resolved_value,
+    }
+
+
+async def predict_line_session_async(
+    varying_axis: str = "z",
+    fixed_values: Optional[Dict[str, float]] = None,
+    line_resolution: Optional[int] = None,
+    *,
+    session: Optional[ComparisonSession] = None,
+    progress_callback=None,
+) -> Dict[str, object]:
+    active_session = session or ACTIVE_SESSION
+    if active_session is None:
+        raise RuntimeError("No active session available. Call fit_session() first.")
+
+    (
+        line_results,
+        normalized_axis,
+        resolved_fixed,
+        resolved_resolution,
+    ) = await compute_line_predictions_async(
+        active_session,
+        varying_axis,
+        fixed_values,
+        line_resolution=line_resolution,
+        progress_callback=progress_callback,
     )
 
     dataset_payload = build_dataset_payload(

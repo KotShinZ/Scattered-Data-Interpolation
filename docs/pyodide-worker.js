@@ -57,7 +57,6 @@ async function handleFit(payload) {
 
     // Set up progress callback in Python
     pyodide.globals.set("progress_callback", pyodide.toPy((index, total, name) => {
-      const percent = Math.round((index / total) * 100);
       postStatus(`学習中... (${index}/${total}) ${name}`);
     }));
 
@@ -95,16 +94,21 @@ async function handlePredictPlane(payload) {
   const value = payload && typeof payload.sliceValue === "number" ? payload.sliceValue : null;
   pyodide.globals.set("PY_SLICE_AXIS", axis);
   pyodide.globals.set("PY_SLICE_VALUE", value);
+  pyodide.globals.set("predict_progress_callback", pyodide.toPy((index, total, name) => {
+    postStatus(`結果を計算中... (${index + 1}/${total}) ${name}`);
+  }));
   try {
     const resultJson = await pyodide.runPythonAsync(`import json
-from compare_interpolation import predict_session
+from compare_interpolation import predict_session_async
 slice_axis = globals().get("PY_SLICE_AXIS") or "z"
 slice_value = globals().get("PY_SLICE_VALUE")
-json.dumps(predict_session(slice_axis=slice_axis, slice_value=slice_value), ensure_ascii=False)`);
+cb = globals().get("predict_progress_callback")
+json.dumps(await predict_session_async(slice_axis=slice_axis, slice_value=slice_value, progress_callback=cb), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {
     pyodide.globals.set("PY_SLICE_AXIS", null);
     pyodide.globals.set("PY_SLICE_VALUE", null);
+    pyodide.globals.set("predict_progress_callback", null);
   }
 }
 
@@ -124,20 +128,25 @@ async function handlePredictLine(payload) {
     pyodide.globals.set("PY_LINE_AXIS", axis);
     pyodide.globals.set("PY_FIXED_AXES", pyFixed);
     pyodide.globals.set("PY_LINE_RESOLUTION", resolution);
+    pyodide.globals.set("predict_progress_callback", pyodide.toPy((index, total, name) => {
+      postStatus(`結果を計算中... (${index + 1}/${total}) ${name}`);
+    }));
     const resultJson = await pyodide.runPythonAsync(`import json
-from compare_interpolation import predict_line_session
+from compare_interpolation import predict_line_session_async
 line_axis = globals().get("PY_LINE_AXIS") or "z"
 fixed_candidate = globals().get("PY_FIXED_AXES")
 fixed_values = None
 if fixed_candidate is not None:
     fixed_values = fixed_candidate
 line_resolution = globals().get("PY_LINE_RESOLUTION")
-json.dumps(predict_line_session(varying_axis=line_axis, fixed_values=fixed_values, line_resolution=line_resolution), ensure_ascii=False)`);
+cb = globals().get("predict_progress_callback")
+json.dumps(await predict_line_session_async(varying_axis=line_axis, fixed_values=fixed_values, line_resolution=line_resolution, progress_callback=cb), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {
     pyodide.globals.set("PY_LINE_AXIS", null);
     pyodide.globals.set("PY_FIXED_AXES", null);
     pyodide.globals.set("PY_LINE_RESOLUTION", null);
+    pyodide.globals.set("predict_progress_callback", null);
     if (pyFixed && typeof pyFixed.destroy === "function") {
       pyFixed.destroy();
     }
