@@ -249,6 +249,26 @@
         margin-top: 0.4rem;
       }
 
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-top: 0.75rem;
+      }
+
+      .toggle-row input[type='checkbox'] {
+        width: 1.1rem;
+        height: 1.1rem;
+        accent-color: var(--accent);
+        cursor: pointer;
+        min-width: unset;
+      }
+
+      .toggle-row label {
+        font-weight: 600;
+        cursor: pointer;
+      }
+
       .hint-box {
         margin-top: 0.8rem;
         padding: 0.85rem 1rem;
@@ -563,6 +583,140 @@
         flex: 1;
         min-height: 420px;
       }
+
+      /* ── Algorithm settings modal ───────────────────────── */
+      .algo-settings-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-bottom: 0.75rem;
+      }
+      .algo-item {
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .algo-item-header {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.55rem 0.9rem;
+        background: rgba(15, 23, 42, 0.02);
+      }
+      .algo-item-toggle {
+        width: 1rem;
+        height: 1rem;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .algo-item-name {
+        flex: 1;
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+      .algo-item-name.disabled {
+        opacity: 0.4;
+        text-decoration: line-through;
+      }
+      .algo-expand-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.15rem 0.5rem;
+        font-size: 0.75rem;
+        color: var(--accent);
+        border-radius: 6px;
+        white-space: nowrap;
+      }
+      .algo-expand-btn:hover {
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .algo-params {
+        display: none;
+        padding: 0.6rem 1rem 0.8rem 2.3rem;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        border-top: 1px solid rgba(15, 23, 42, 0.07);
+        background: rgba(15, 23, 42, 0.015);
+      }
+      .algo-params.open {
+        display: flex;
+      }
+      .algo-param-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        min-width: 130px;
+      }
+      .algo-param-field label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+      .algo-param-field input {
+        padding: 0.4rem 0.6rem;
+        border-radius: 0.5rem;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        font-size: 0.88rem;
+        width: 100%;
+      }
+      .algo-group-header {
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        padding: 0.6rem 0 0.25rem;
+      }
+      .algo-select-all-row {
+        display: flex;
+        gap: 0.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+        margin-bottom: 0.25rem;
+      }
+      .algo-select-all-row button {
+        font-size: 0.8rem;
+        padding: 0.3rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 23, 42, 0.15);
+        background: none;
+        cursor: pointer;
+      }
+      .algo-select-all-row button:hover {
+        background: rgba(37, 99, 235, 0.07);
+      }
+      .algo-modal-footer {
+        display: flex;
+        gap: 0.6rem;
+        justify-content: flex-end;
+        padding: 0.75rem 1.5rem 1.25rem;
+        border-top: 1px solid rgba(15, 23, 42, 0.07);
+        flex-shrink: 0;
+      }
+      .algo-modal-footer button {
+        padding: 0.55rem 1.3rem;
+        border-radius: 999px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .algo-modal-footer .btn-apply {
+        background: var(--accent);
+        color: #fff;
+      }
+      .algo-modal-footer .btn-apply:hover {
+        background: #1d4ed8;
+      }
+      .algo-modal-footer .btn-reset,
+      .algo-modal-footer .btn-cancel {
+        background: rgba(15, 23, 42, 0.07);
+      }
+      .algo-modal-footer .btn-reset:hover,
+      .algo-modal-footer .btn-cancel:hover {
+        background: rgba(15, 23, 42, 0.12);
+      }
     </style>
   </head>
   <body>
@@ -578,6 +732,7 @@
           </p>
         </div>
         <div class="hero-actions">
+          <button id="algo-settings-button" type="button">アルゴリズム設定</button>
           <button id="metrics-button" disabled>滑らかさ計算</button>
           <button id="run-button" disabled>結果を計算</button>
           <p id="status">Pyodideを初期化中...</p>
@@ -598,6 +753,10 @@
             <button id="use-saved-dataset" type="button" hidden>保存済みデータを読み込む</button>
           </div>
           <span id="dataset-label">現在: データ未読み込み</span>
+          <div class="toggle-row">
+            <input type="checkbox" id="normalize-toggle" />
+            <label for="normalize-toggle">正規化（x,y,z を平均・標準偏差で正規化して補間）</label>
+          </div>
           <div class="hint-box">
             CSV には <code>x,y,z,value</code> の 4 列を含めてください。データを読み込み学習が完了すると、「結果を計算」で predict のみが実行されます。
           </div>
@@ -755,6 +914,24 @@
             値を変更すると再計算せずに即座に散布点へ反映されます。空欄の場合は自動設定の範囲が使われます。
           </div>
         </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="algo-settings-backdrop"></div>
+    <div class="modal-window" id="algo-settings-modal" aria-hidden="true">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="algo-settings-title">
+        <header>
+          <h3 id="algo-settings-title">アルゴリズム設定</h3>
+          <button type="button" class="modal-close" id="algo-settings-close">閉じる</button>
+        </header>
+        <div class="modal-body" id="algo-settings-body">
+          <!-- Rendered dynamically by JS -->
+        </div>
+        <div class="algo-modal-footer">
+          <button type="button" class="btn-cancel" id="algo-settings-cancel">キャンセル</button>
+          <button type="button" class="btn-reset" id="algo-settings-reset">デフォルトに戻す</button>
+          <button type="button" class="btn-apply" id="algo-settings-apply">適用して再学習</button>
         </div>
       </div>
     </div>
@@ -1930,11 +2107,16 @@
           statusEl.textContent = `${label} を用いて学習中...`;
           try {
             await pyodideReadyPromise;
+            const normalizeToggle = document.getElementById("normalize-toggle");
+            const normalizeFlag = normalizeToggle ? normalizeToggle.checked : false;
             await callWorker("fit", {
               dataset: datasetSource === "custom" ? importedDataset : null,
+              normalize: normalizeFlag,
+              algorithmConfigs: currentAlgoConfigs,
             });
             sessionReady = true;
-            statusEl.textContent = `${label} の学習が完了しました。滑らかさ計算ボタンでRMSE・滑らかさを計算できます。`;
+            const normalizeNote = normalizeFlag ? "（正規化あり）" : "";
+            statusEl.textContent = `${label} の学習が完了しました${normalizeNote}。滑らかさ計算ボタンでRMSE・滑らかさを計算できます。`;
           } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : String(error);
@@ -2018,8 +2200,214 @@
           }
         });
       }
+      // ── Algorithm settings modal ──────────────────────────────────────────
+      const ALGORITHM_DEFAULTS = [
+        { id: "NearestNeighbor",           name: "Nearest Neighbor",                      group: "基本手法",           params: [] },
+        { id: "KNNUniform",                name: "K-Neighbors (uniform)",                 group: "基本手法",           params: [{ key: "k",              label: "k（近傍数）",       type: "int",   default: 4,    min: 1,     max: 50  }] },
+        { id: "IDW",                       name: "Inverse Distance Weighting",            group: "基本手法",           params: [{ key: "power",          label: "power",             type: "float", default: 2.0,  min: 0.1,   max: 10  }] },
+        { id: "LinearRegression",          name: "Linear (global regression)",            group: "基本手法",           params: [] },
+        { id: "RBF_linear",                name: "RBF (linear)",                          group: "RBF",                params: [{ key: "regularization", label: "regularization",    type: "float", default: 1e-6, min: 0 }] },
+        { id: "RBF_cubic",                 name: "RBF (cubic)",                           group: "RBF",                params: [{ key: "regularization", label: "regularization",    type: "float", default: 1e-6, min: 0 }] },
+        { id: "RBF_quintic",               name: "RBF (quintic)",                         group: "RBF",                params: [{ key: "regularization", label: "regularization",    type: "float", default: 1e-6, min: 0 }] },
+        { id: "RBF_gaussian",              name: "RBF (gaussian)",                        group: "RBF",                params: [{ key: "epsilon",        label: "epsilon",           type: "float", default: 1.5,  min: 0.01 }, { key: "regularization", label: "regularization", type: "float", default: 1e-6, min: 0 }] },
+        { id: "RBF_multiquadric",          name: "RBF (multiquadric)",                    group: "RBF",                params: [{ key: "epsilon",        label: "epsilon",           type: "float", default: 1.0,  min: 0.01 }, { key: "regularization", label: "regularization", type: "float", default: 1e-6, min: 0 }] },
+        { id: "RBF_inverse_multiquadric",  name: "RBF (inverse_multiquadric)",            group: "RBF",                params: [{ key: "epsilon",        label: "epsilon",           type: "float", default: 1.0,  min: 0.01 }, { key: "regularization", label: "regularization", type: "float", default: 1e-6, min: 0 }] },
+        { id: "ThinPlateSpline",           name: "Thin-Plate Spline",                     group: "RBF",                params: [{ key: "regularization", label: "regularization",    type: "float", default: 1e-6, min: 0 }] },
+        { id: "GaussianProcess",           name: "Gaussian Process Regression",           group: "ガウス過程",          params: [{ key: "length_scale",   label: "length_scale",      type: "float", default: 0.35, min: 0.001 }, { key: "alpha", label: "alpha（ノイズ）", type: "float", default: 1e-4, min: 0 }] },
+        { id: "OrdinaryKriging",           name: "Ordinary Kriging",                      group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.5,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "UniversalKriging",          name: "Universal Kriging",                     group: "クリギング",          params: [] },
+        { id: "ExponentialKriging",        name: "Exponential Kriging",                   group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.45, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "GaussianKriging",           name: "Gaussian Kriging",                      group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.4,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "PowerKriging",              name: "Power Kriging",                         group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "power",       label: "power",             type: "float", default: 1.5,  min: 0.1  }, { key: "scale", label: "scale", type: "float", default: 0.5, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "AnisotropicKriging",        name: "Anisotropic Kriging",                   group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_x",     label: "range X",           type: "float", default: 0.4,  min: 0.001 }, { key: "range_y", label: "range Y", type: "float", default: 0.25, min: 0.001 }, { key: "range_z", label: "range Z", type: "float", default: 0.6, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "QuadraticDriftKriging",     name: "Universal Kriging (quadratic drift)",   group: "クリギング",          params: [] },
+        { id: "LinearKriging",             name: "Linear Kriging",                        group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.5,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "CubicKriging",              name: "Cubic Kriging",                         group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.6,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "RationalQuadraticKriging",  name: "Rational Quadratic Kriging",            group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.45, min: 0.001 }, { key: "alpha", label: "alpha", type: "float", default: 1.0, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "HoleEffectKriging",         name: "Hole-Effect Kriging",                   group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.35, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "Matern32Kriging",           name: "Matérn ν=3/2 Kriging",                 group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.4,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "Matern52Kriging",           name: "Matérn ν=5/2 Kriging",                 group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.35, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "LogarithmicKriging",        name: "Logarithmic Kriging",                   group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.5,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "CauchyKriging",             name: "Cauchy Kriging",                        group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.45, min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "StableKriging",             name: "Stable Kriging",                        group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "range_param", label: "range", type: "float", default: 0.4,  min: 0.001 }, { key: "alpha",       label: "alpha（安定指数）",  type: "float", default: 1.2,  min: 0.1,   max: 2.0 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "SplineKriging",             name: "Spline Kriging",                        group: "クリギング",          params: [{ key: "sill",           label: "sill",              type: "float", default: 1.0,  min: 0.001 }, { key: "scale",       label: "scale",             type: "float", default: 0.5,  min: 0.001 }, { key: "nugget", label: "nugget", type: "float", default: 1e-4, min: 0 }] },
+        { id: "ModifiedShepard",           name: "Modified Shepard",                      group: "MLS",                params: [{ key: "n_neighbors",    label: "n_neighbors",       type: "int",   default: 9,    min: 1,     max: 100 }, { key: "radius_factor", label: "radius_factor", type: "float", default: 2.0, min: 0.1 }, { key: "power", label: "power", type: "float", default: 2.0, min: 0.1 }] },
+        { id: "MLS_approx",                name: "MLS (approximating)",                   group: "MLS",                params: [{ key: "radius",         label: "radius",            type: "float", default: 0.5,  min: 0.001 }, { key: "degree",      label: "degree (1 or 2)",   type: "int",   default: 2,    min: 1,     max: 2   }] },
+        { id: "MLS_interpolating",         name: "Interpolating MLS",                     group: "MLS",                params: [{ key: "power",          label: "power",             type: "float", default: 4.0,  min: 0.1   }, { key: "degree",      label: "degree (1 or 2)",   type: "int",   default: 2,    min: 1,     max: 2   }] },
+      ];
+      const ALGO_CONFIGS_STORAGE_KEY = "algo_configs_v1";
+
+      function getDefaultAlgoConfigs() {
+        return ALGORITHM_DEFAULTS.map(def => ({
+          id: def.id,
+          enabled: true,
+          params: Object.fromEntries(def.params.map(p => [p.key, p.default])),
+        }));
+      }
+
+      function loadAlgoConfigs() {
+        try {
+          const stored = localStorage.getItem(ALGO_CONFIGS_STORAGE_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) return parsed;
+          }
+        } catch (e) {}
+        return getDefaultAlgoConfigs();
+      }
+
+      function saveAlgoConfigs(configs) {
+        try { localStorage.setItem(ALGO_CONFIGS_STORAGE_KEY, JSON.stringify(configs)); } catch (e) {}
+      }
+
+      let currentAlgoConfigs = loadAlgoConfigs();
+      // Merge in any new algorithms added since last save
+      ALGORITHM_DEFAULTS.forEach(def => {
+        if (!currentAlgoConfigs.find(c => c.id === def.id)) {
+          currentAlgoConfigs.push({ id: def.id, enabled: true, params: Object.fromEntries(def.params.map(p => [p.key, p.default])) });
+        }
+      });
+
+      const algoSettingsModalEl = document.getElementById("algo-settings-modal");
+      const algoSettingsBackdropEl = document.getElementById("algo-settings-backdrop");
+      const algoSettingsBodyEl = document.getElementById("algo-settings-body");
+      const algoSettingsOpenButtonEl = document.getElementById("algo-settings-button");
+      const algoSettingsCloseButtonEl = document.getElementById("algo-settings-close");
+      const algoSettingsCancelButtonEl = document.getElementById("algo-settings-cancel");
+      const algoSettingsResetButtonEl = document.getElementById("algo-settings-reset");
+      const algoSettingsApplyButtonEl = document.getElementById("algo-settings-apply");
+      let algoModalWorkingCopy = null;
+
+      function buildAlgoModal(configs) {
+        if (!algoSettingsBodyEl) return;
+        const configMap = Object.fromEntries(configs.map(c => [c.id, c]));
+        const groups = [...new Set(ALGORITHM_DEFAULTS.map(d => d.group))];
+        let html = `<div class="algo-select-all-row">
+          <button type="button" id="algo-select-all">すべて有効</button>
+          <button type="button" id="algo-select-none">すべて無効</button>
+        </div>`;
+        groups.forEach(group => {
+          const defs = ALGORITHM_DEFAULTS.filter(d => d.group === group);
+          html += `<div class="algo-group-header">${group}</div><div class="algo-settings-list">`;
+          defs.forEach(def => {
+            const cfg = configMap[def.id] || { id: def.id, enabled: true, params: {} };
+            const on = cfg.enabled !== false;
+            const prm = cfg.params || {};
+            const hasP = def.params.length > 0;
+            html += `<div class="algo-item" data-algo-id="${def.id}">
+              <div class="algo-item-header">
+                <input type="checkbox" class="algo-item-toggle" data-algo-id="${def.id}" ${on ? "checked" : ""}>
+                <span class="algo-item-name${on ? "" : " disabled"}">${def.name}</span>
+                ${hasP ? `<button type="button" class="algo-expand-btn" data-algo-id="${def.id}">パラメータ ▼</button>` : ""}
+              </div>`;
+            if (hasP) {
+              html += `<div class="algo-params" data-params-for="${def.id}">`;
+              def.params.forEach(pm => {
+                const v = prm[pm.key] !== undefined ? prm[pm.key] : pm.default;
+                html += `<div class="algo-param-field">
+                  <label for="param-${def.id}-${pm.key}">${pm.label}</label>
+                  <input type="number" id="param-${def.id}-${pm.key}"
+                    data-algo-id="${def.id}" data-param-key="${pm.key}"
+                    value="${v}" step="${pm.type === "int" ? 1 : "any"}"
+                    ${pm.min !== undefined ? `min="${pm.min}"` : ""}
+                    ${pm.max !== undefined ? `max="${pm.max}"` : ""}>
+                </div>`;
+              });
+              html += `</div>`;
+            }
+            html += `</div>`;
+          });
+          html += `</div>`;
+        });
+        algoSettingsBodyEl.innerHTML = html;
+
+        algoSettingsBodyEl.querySelectorAll(".algo-item-toggle").forEach(cb => {
+          cb.addEventListener("change", () => {
+            const id = cb.dataset.algoId;
+            const c = algoModalWorkingCopy.find(x => x.id === id);
+            if (c) c.enabled = cb.checked;
+            const nameEl = algoSettingsBodyEl.querySelector(`.algo-item[data-algo-id="${id}"] .algo-item-name`);
+            if (nameEl) nameEl.classList.toggle("disabled", !cb.checked);
+          });
+        });
+        algoSettingsBodyEl.querySelectorAll(".algo-expand-btn").forEach(btn => {
+          btn.addEventListener("click", e => {
+            e.stopPropagation();
+            const paramsEl = algoSettingsBodyEl.querySelector(`.algo-params[data-params-for="${btn.dataset.algoId}"]`);
+            if (paramsEl) {
+              const open = paramsEl.classList.toggle("open");
+              btn.textContent = `パラメータ ${open ? "▲" : "▼"}`;
+            }
+          });
+        });
+        algoSettingsBodyEl.querySelectorAll(".algo-params input[type=number]").forEach(input => {
+          input.addEventListener("change", () => {
+            const id = input.dataset.algoId;
+            const key = input.dataset.paramKey;
+            const def = ALGORITHM_DEFAULTS.find(d => d.id === id);
+            const pm = def ? def.params.find(p => p.key === key) : null;
+            const c = algoModalWorkingCopy.find(x => x.id === id);
+            if (c && pm) {
+              const raw = Number(input.value);
+              c.params[key] = pm.type === "int" ? Math.round(raw) : raw;
+            }
+          });
+        });
+        const selectAllBtn = algoSettingsBodyEl.querySelector("#algo-select-all");
+        const selectNoneBtn = algoSettingsBodyEl.querySelector("#algo-select-none");
+        if (selectAllBtn) selectAllBtn.addEventListener("click", () => setAllAlgoEnabled(true));
+        if (selectNoneBtn) selectNoneBtn.addEventListener("click", () => setAllAlgoEnabled(false));
+      }
+
+      function setAllAlgoEnabled(enabled) {
+        if (!algoModalWorkingCopy) return;
+        algoModalWorkingCopy.forEach(c => { c.enabled = enabled; });
+        algoSettingsBodyEl.querySelectorAll(".algo-item-toggle").forEach(cb => { cb.checked = enabled; });
+        algoSettingsBodyEl.querySelectorAll(".algo-item-name").forEach(el => el.classList.toggle("disabled", !enabled));
+      }
+
+      function openAlgoSettingsModal() {
+        if (!algoSettingsModalEl) return;
+        algoModalWorkingCopy = currentAlgoConfigs.map(c => ({ id: c.id, enabled: c.enabled, params: Object.assign({}, c.params) }));
+        buildAlgoModal(algoModalWorkingCopy);
+        if (algoSettingsBackdropEl) algoSettingsBackdropEl.classList.add("open");
+        algoSettingsModalEl.classList.add("open");
+        algoSettingsModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      function closeAlgoSettingsModal() {
+        if (!algoSettingsModalEl) return;
+        algoSettingsModalEl.classList.remove("open");
+        algoSettingsModalEl.setAttribute("aria-hidden", "true");
+        if (algoSettingsBackdropEl) algoSettingsBackdropEl.classList.remove("open");
+        algoModalWorkingCopy = null;
+      }
+
+      async function applyAlgoSettings() {
+        if (!algoModalWorkingCopy) return;
+        currentAlgoConfigs = algoModalWorkingCopy;
+        saveAlgoConfigs(currentAlgoConfigs);
+        algoModalWorkingCopy = null;
+        closeAlgoSettingsModal();
+        if (datasetSource !== "none") {
+          await trainCurrentDataset();
+        }
+      }
+
+      if (algoSettingsOpenButtonEl) algoSettingsOpenButtonEl.addEventListener("click", openAlgoSettingsModal);
+      if (algoSettingsCloseButtonEl) algoSettingsCloseButtonEl.addEventListener("click", closeAlgoSettingsModal);
+      if (algoSettingsCancelButtonEl) algoSettingsCancelButtonEl.addEventListener("click", closeAlgoSettingsModal);
+      if (algoSettingsResetButtonEl) algoSettingsResetButtonEl.addEventListener("click", () => {
+        algoModalWorkingCopy = getDefaultAlgoConfigs();
+        buildAlgoModal(algoModalWorkingCopy);
+      });
+      if (algoSettingsApplyButtonEl) algoSettingsApplyButtonEl.addEventListener("click", applyAlgoSettings);
+      if (algoSettingsBackdropEl) algoSettingsBackdropEl.addEventListener("click", closeAlgoSettingsModal);
+      if (algoSettingsModalEl) algoSettingsModalEl.addEventListener("click", e => { if (e.target === algoSettingsModalEl) closeAlgoSettingsModal(); });
+
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
+          closeAlgoSettingsModal();
           closePlaneSettingsModal();
           closePlaneModal();
         }

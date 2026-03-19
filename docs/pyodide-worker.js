@@ -40,12 +40,20 @@ async function ensurePyodide() {
 async function handleFit(payload) {
   const pyodide = await ensurePyodide();
   const dataset = payload && payload.dataset ? payload.dataset : null;
+  const normalize = payload && payload.normalize === true;
+  const algorithmConfigs = payload && Array.isArray(payload.algorithmConfigs) ? payload.algorithmConfigs : null;
   let pyDataset = null;
+  let pyAlgorithmConfigs = null;
   if (dataset !== null) {
     pyDataset = pyodide.toPy(dataset);
   }
+  if (algorithmConfigs !== null) {
+    pyAlgorithmConfigs = pyodide.toPy(algorithmConfigs);
+  }
   try {
     pyodide.globals.set("PY_DATASET", pyDataset);
+    pyodide.globals.set("PY_NORMALIZE", normalize);
+    pyodide.globals.set("PY_ALGORITHM_CONFIGS", pyAlgorithmConfigs);
 
     // Set up progress callback in Python
     pyodide.globals.set("progress_callback", pyodide.toPy((index, total, name) => {
@@ -62,13 +70,21 @@ if dataset_candidate is not None:
     dataset_input = normalize_dataset(dataset_candidate)
 
 progress_cb = globals().get("progress_callback")
-fit_session(dataset=dataset_input, progress_callback=progress_cb)`);
+normalize_flag = globals().get("PY_NORMALIZE") or False
+algo_configs_raw = globals().get("PY_ALGORITHM_CONFIGS")
+algo_configs = list(algo_configs_raw) if algo_configs_raw is not None else None
+fit_session(dataset=dataset_input, progress_callback=progress_cb, normalize=normalize_flag, algorithm_configs=algo_configs)`);
     return { status: "ok" };
   } finally {
     pyodide.globals.set("PY_DATASET", null);
+    pyodide.globals.set("PY_NORMALIZE", null);
+    pyodide.globals.set("PY_ALGORITHM_CONFIGS", null);
     pyodide.globals.set("progress_callback", null);
     if (pyDataset && typeof pyDataset.destroy === "function") {
       pyDataset.destroy();
+    }
+    if (pyAlgorithmConfigs && typeof pyAlgorithmConfigs.destroy === "function") {
+      pyAlgorithmConfigs.destroy();
     }
   }
 }

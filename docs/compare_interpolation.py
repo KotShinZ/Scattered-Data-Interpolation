@@ -346,6 +346,30 @@ class Interpolator:
         raise NotImplementedError
 
 
+class NormalizingInterpolator(Interpolator):
+    """Wraps an interpolator to normalize spatial (x,y,z) coordinates before fit/predict."""
+
+    def __init__(self, base: "Interpolator", means: List[float], stds: List[float]) -> None:
+        self._base = base
+        self._means = means
+        self._stds = stds
+        self.name = base.name
+        self.smoothness_class = base.smoothness_class
+
+    def fit(self, points: Sequence[Point3D], values: Sequence[float]) -> None:
+        self._base.fit([self._norm(p) for p in points], list(values))
+
+    def predict(self, point: Point3D) -> float:
+        return self._base.predict(self._norm(point))
+
+    def _norm(self, point: Point3D) -> Point3D:
+        return (
+            (point[0] - self._means[0]) / self._stds[0],
+            (point[1] - self._means[1]) / self._stds[1],
+            (point[2] - self._means[2]) / self._stds[2],
+        )
+
+
 class NearestNeighborInterpolator(Interpolator):
     name = "Nearest Neighbor"
     smoothness_class = "C0 (discontinuous)"
@@ -1484,6 +1508,9 @@ class ComparisonSession:
     grid_size: int
     methods: List[TrainedMethod]
     skipped: List[Tuple[str, str]]
+    normalize: bool = False
+    norm_means: List[float] = field(default_factory=list)
+    norm_stds: List[float] = field(default_factory=list)
 
 
 ACTIVE_SESSION: Optional[ComparisonSession] = None
@@ -1587,41 +1614,257 @@ def evaluate_interpolator(
 # ---------------------------------------------------------------------------
 
 
-def create_interpolators() -> List[Interpolator]:
-    return [
-        NearestNeighborInterpolator(),
-        KNNUniformInterpolator(k=4),
-        InverseDistanceWeightingInterpolator(),
-        LinearRegressionInterpolator(),
-        RBFInterpolator("linear"),
-        RBFInterpolator("cubic"),
-        RBFInterpolator("quintic"),
-        RBFInterpolator("gaussian", epsilon=1.5),
-        RBFInterpolator("multiquadric", epsilon=1.0),
-        RBFInterpolator("inverse_multiquadric", epsilon=1.0),
-        ThinPlateSplineInterpolator(),
-        GaussianProcessInterpolator(length_scale=0.35),
-        OrdinaryKrigingInterpolator(),
-        UniversalKrigingInterpolator(),
-        ExponentialKrigingInterpolator(),
-        GaussianKrigingInterpolator(),
-        PowerKrigingInterpolator(),
-        AnisotropicKrigingInterpolator(),
-        QuadraticDriftKrigingInterpolator(),
-        LinearKrigingInterpolator(),
-        CubicKrigingInterpolator(),
-        RationalQuadraticKrigingInterpolator(),
-        HoleEffectKrigingInterpolator(),
-        Matern32KrigingInterpolator(),
-        Matern52KrigingInterpolator(),
-        LogarithmicKrigingInterpolator(),
-        CauchyKrigingInterpolator(),
-        StableKrigingInterpolator(),
-        SplineKrigingInterpolator(),
-        ModifiedShepardInterpolator(n_neighbors=9),
-        MovingLeastSquaresInterpolator(radius=0.5, degree=2),
-        InterpolatingMLSInterpolator(power=4.0, degree=2),
-    ]
+def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
+    """Create interpolators, optionally filtered/configured by algorithm_configs.
+
+    algorithm_configs: list of dicts with keys:
+        id       - algorithm identifier string
+        enabled  - bool
+        params   - dict of hyperparameter overrides
+    If None or empty, all algorithms are created with defaults.
+    """
+    config_map: Dict[str, Any] = {}
+    if algorithm_configs:
+        for c in algorithm_configs:
+            algo_id = c.get("id") if isinstance(c, dict) else None
+            if algo_id:
+                config_map[algo_id] = c
+
+    def enabled(algo_id: str) -> bool:
+        c = config_map.get(algo_id)
+        if c is None:
+            return True
+        val = c.get("enabled", True) if isinstance(c, dict) else True
+        return bool(val)
+
+    def p(algo_id: str) -> Dict[str, Any]:
+        c = config_map.get(algo_id)
+        if c is None:
+            return {}
+        params = c.get("params", {}) if isinstance(c, dict) else {}
+        return params if isinstance(params, dict) and params else {}
+
+    result: List[Interpolator] = []
+
+    if enabled("NearestNeighbor"):
+        result.append(NearestNeighborInterpolator())
+
+    if enabled("KNNUniform"):
+        q = p("KNNUniform")
+        result.append(KNNUniformInterpolator(k=int(q.get("k", 4))))
+
+    if enabled("IDW"):
+        q = p("IDW")
+        result.append(InverseDistanceWeightingInterpolator(
+            power=float(q.get("power", 2.0)),
+        ))
+
+    if enabled("LinearRegression"):
+        result.append(LinearRegressionInterpolator())
+
+    if enabled("RBF_linear"):
+        q = p("RBF_linear")
+        result.append(RBFInterpolator("linear", regularization=float(q.get("regularization", 1e-6))))
+
+    if enabled("RBF_cubic"):
+        q = p("RBF_cubic")
+        result.append(RBFInterpolator("cubic", regularization=float(q.get("regularization", 1e-6))))
+
+    if enabled("RBF_quintic"):
+        q = p("RBF_quintic")
+        result.append(RBFInterpolator("quintic", regularization=float(q.get("regularization", 1e-6))))
+
+    if enabled("RBF_gaussian"):
+        q = p("RBF_gaussian")
+        result.append(RBFInterpolator(
+            "gaussian",
+            epsilon=float(q.get("epsilon", 1.5)),
+            regularization=float(q.get("regularization", 1e-6)),
+        ))
+
+    if enabled("RBF_multiquadric"):
+        q = p("RBF_multiquadric")
+        result.append(RBFInterpolator(
+            "multiquadric",
+            epsilon=float(q.get("epsilon", 1.0)),
+            regularization=float(q.get("regularization", 1e-6)),
+        ))
+
+    if enabled("RBF_inverse_multiquadric"):
+        q = p("RBF_inverse_multiquadric")
+        result.append(RBFInterpolator(
+            "inverse_multiquadric",
+            epsilon=float(q.get("epsilon", 1.0)),
+            regularization=float(q.get("regularization", 1e-6)),
+        ))
+
+    if enabled("ThinPlateSpline"):
+        q = p("ThinPlateSpline")
+        result.append(ThinPlateSplineInterpolator(regularization=float(q.get("regularization", 1e-6))))
+
+    if enabled("GaussianProcess"):
+        q = p("GaussianProcess")
+        result.append(GaussianProcessInterpolator(
+            length_scale=float(q.get("length_scale", 0.35)),
+            alpha=float(q.get("alpha", 1e-4)),
+        ))
+
+    if enabled("OrdinaryKriging"):
+        q = p("OrdinaryKriging")
+        result.append(OrdinaryKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.5)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("UniversalKriging"):
+        result.append(UniversalKrigingInterpolator())
+
+    if enabled("ExponentialKriging"):
+        q = p("ExponentialKriging")
+        result.append(ExponentialKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.45)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("GaussianKriging"):
+        q = p("GaussianKriging")
+        result.append(GaussianKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.4)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("PowerKriging"):
+        q = p("PowerKriging")
+        result.append(PowerKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            power=float(q.get("power", 1.5)),
+            scale=float(q.get("scale", 0.5)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("AnisotropicKriging"):
+        q = p("AnisotropicKriging")
+        result.append(AnisotropicKrigingInterpolator(
+            ranges=(
+                float(q.get("range_x", 0.4)),
+                float(q.get("range_y", 0.25)),
+                float(q.get("range_z", 0.6)),
+            ),
+            sill=float(q.get("sill", 1.0)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("QuadraticDriftKriging"):
+        result.append(QuadraticDriftKrigingInterpolator())
+
+    if enabled("LinearKriging"):
+        q = p("LinearKriging")
+        result.append(LinearKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.5)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("CubicKriging"):
+        q = p("CubicKriging")
+        result.append(CubicKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.6)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("RationalQuadraticKriging"):
+        q = p("RationalQuadraticKriging")
+        result.append(RationalQuadraticKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.45)),
+            alpha=float(q.get("alpha", 1.0)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("HoleEffectKriging"):
+        q = p("HoleEffectKriging")
+        result.append(HoleEffectKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.35)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("Matern32Kriging"):
+        q = p("Matern32Kriging")
+        result.append(Matern32KrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.4)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("Matern52Kriging"):
+        q = p("Matern52Kriging")
+        result.append(Matern52KrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.35)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("LogarithmicKriging"):
+        q = p("LogarithmicKriging")
+        result.append(LogarithmicKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.5)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("CauchyKriging"):
+        q = p("CauchyKriging")
+        result.append(CauchyKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.45)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("StableKriging"):
+        q = p("StableKriging")
+        result.append(StableKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            range_param=float(q.get("range_param", 0.4)),
+            alpha=float(q.get("alpha", 1.2)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("SplineKriging"):
+        q = p("SplineKriging")
+        result.append(SplineKrigingInterpolator(
+            sill=float(q.get("sill", 1.0)),
+            scale=float(q.get("scale", 0.5)),
+            nugget=float(q.get("nugget", 1e-4)),
+        ))
+
+    if enabled("ModifiedShepard"):
+        q = p("ModifiedShepard")
+        result.append(ModifiedShepardInterpolator(
+            n_neighbors=int(q.get("n_neighbors", 9)),
+            radius_factor=float(q.get("radius_factor", 2.0)),
+            power=float(q.get("power", 2.0)),
+        ))
+
+    if enabled("MLS_approx"):
+        q = p("MLS_approx")
+        result.append(MovingLeastSquaresInterpolator(
+            radius=float(q.get("radius", 0.5)),
+            degree=int(q.get("degree", 2)),
+        ))
+
+    if enabled("MLS_interpolating"):
+        q = p("MLS_interpolating")
+        result.append(InterpolatingMLSInterpolator(
+            power=float(q.get("power", 4.0)),
+            degree=int(q.get("degree", 2)),
+        ))
+
+    return result
 
 
 def compute_grid_axes(
@@ -1635,6 +1878,21 @@ def compute_grid_axes(
         grid_axes.append(values)
         axis_steps.append(step if step > 0 else 1.0)
     return grid_axes, axis_steps
+
+
+def compute_spatial_normalization(
+    points: Sequence[Point3D],
+) -> Tuple[List[float], List[float]]:
+    """Return (means, stds) for each spatial axis. std is clamped to >=1e-10."""
+    means: List[float] = []
+    stds: List[float] = []
+    for i in range(3):
+        vals = [p[i] for p in points]
+        mean = statistics.mean(vals)
+        std = statistics.stdev(vals) if len(vals) > 1 else 1.0
+        means.append(mean)
+        stds.append(std if std > 1e-10 else 1.0)
+    return means, stds
 
 
 def compute_grid_predictions(
@@ -1665,11 +1923,16 @@ def fit_single_interpolator(
     _t0 = time.perf_counter()
     interpolator.fit(train_points, train_values)
     fit_time_ms = (time.perf_counter() - _t0) * 1000.0
+    _t1 = time.perf_counter()
+    for p in train_points:
+        interpolator.predict(p)
+    predict_time_ms = (time.perf_counter() - _t1) * 1000.0 / len(train_points) if train_points else 0.0
     return TrainedMethod(
         interpolator=interpolator,
         method=getattr(interpolator, "name", interpolator.__class__.__name__),
         smoothness_class=getattr(interpolator, "smoothness_class", ""),
         fit_time_ms=fit_time_ms,
+        predict_time_ms=predict_time_ms,
     )
 
 
@@ -1962,6 +2225,8 @@ def fit_session(
     seed: int = 123,
     test_ratio: float = 0.2,
     grid_size: int = 6,
+    normalize: bool = False,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
     progress_callback = None,
 ) -> ComparisonSession:
     if dataset is None:
@@ -1975,9 +2240,15 @@ def fit_session(
     grid_axes, axis_steps = compute_grid_axes(axis_bounds, grid_size)
     train = dataset_list[:]  # Fit on all points so RMSE reflects original samples
 
+    norm_means: List[float] = []
+    norm_stds: List[float] = []
+    if normalize:
+        all_points = [p for p, _ in dataset_list]
+        norm_means, norm_stds = compute_spatial_normalization(all_points)
+
     methods: List[TrainedMethod] = []
     skipped: List[Tuple[str, str]] = []
-    interpolators = create_interpolators()
+    interpolators = create_interpolators(algorithm_configs)
     total_count = len(interpolators)
 
     for index, interpolator in enumerate(interpolators):
@@ -1986,6 +2257,8 @@ def fit_session(
             progress_callback(index, total_count, interpolator.name)
 
         try:
+            if normalize:
+                interpolator = NormalizingInterpolator(interpolator, norm_means, norm_stds)
             trained = fit_single_interpolator(interpolator, train[:])
             methods.append(trained)
         except ValueError as exc:
@@ -1999,6 +2272,9 @@ def fit_session(
         grid_size=grid_size,
         methods=methods,
         skipped=skipped,
+        normalize=normalize,
+        norm_means=norm_means,
+        norm_stds=norm_stds,
     )
 
     global ACTIVE_SESSION
@@ -2279,10 +2555,19 @@ def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, obj
         "grid_size": active_session.grid_size,
         "methods": [],
         "skipped": list(active_session.skipped),
+        "normalize": active_session.normalize,
+        "norm_means": list(active_session.norm_means),
+        "norm_stds": list(active_session.norm_stds),
     }
 
     # Serialize each trained method
     for method in active_session.methods:
+        # If wrapped by NormalizingInterpolator, serialize the base interpolator
+        actual_interp = (
+            method.interpolator._base
+            if isinstance(method.interpolator, NormalizingInterpolator)
+            else method.interpolator
+        )
         method_data = {
             "method": method.method,
             "smoothness_class": method.smoothness_class,
@@ -2295,7 +2580,7 @@ def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, obj
             "grid_points": [list(p) for p in method.grid_points],
             "grid_values": list(method.grid_values),
             # Serialize interpolator state
-            "interpolator_state": _serialize_interpolator(method.interpolator),
+            "interpolator_state": _serialize_interpolator(actual_interp),
         }
         exported["methods"].append(method_data)
 
@@ -2399,10 +2684,17 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
     # Restore dataset
     dataset = [(tuple(point), value) for point, value in exported["dataset"]]
 
+    normalize = bool(exported.get("normalize", False))
+    norm_means = list(exported.get("norm_means", []))
+    norm_stds = list(exported.get("norm_stds", []))
+
     # Restore methods
     methods = []
     for method_data in exported["methods"]:
         interpolator = _deserialize_interpolator(method_data["interpolator_state"])
+        # Re-wrap with NormalizingInterpolator if session was trained with normalization
+        if normalize and norm_means and norm_stds:
+            interpolator = NormalizingInterpolator(interpolator, norm_means, norm_stds)
 
         trained = TrainedMethod(
             interpolator=interpolator,
@@ -2428,6 +2720,9 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
         grid_size=exported["grid_size"],
         methods=methods,
         skipped=list(exported["skipped"]),
+        normalize=normalize,
+        norm_means=norm_means,
+        norm_stds=norm_stds,
     )
 
     ACTIVE_SESSION = session
