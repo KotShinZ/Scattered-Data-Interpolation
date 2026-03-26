@@ -71,7 +71,10 @@ if dataset_candidate is not None:
 progress_cb = globals().get("progress_callback")
 normalize_flag = globals().get("PY_NORMALIZE") or False
 algo_configs_raw = globals().get("PY_ALGORITHM_CONFIGS")
-algo_configs = list(algo_configs_raw) if algo_configs_raw is not None else None
+if algo_configs_raw is not None:
+    algo_configs = algo_configs_raw.to_py() if hasattr(algo_configs_raw, "to_py") else [c.to_py() if hasattr(c, "to_py") else c for c in algo_configs_raw]
+else:
+    algo_configs = None
 fit_session(dataset=dataset_input, progress_callback=progress_cb, normalize=normalize_flag, algorithm_configs=algo_configs)`);
     return { status: "ok" };
   } finally {
@@ -92,8 +95,14 @@ async function handlePredictPlane(payload) {
   const pyodide = await ensurePyodide();
   const axis = payload && payload.sliceAxis ? payload.sliceAxis : "z";
   const value = payload && typeof payload.sliceValue === "number" ? payload.sliceValue : null;
+  const algorithmConfigs = payload && Array.isArray(payload.algorithmConfigs) ? payload.algorithmConfigs : null;
+  let pyAlgorithmConfigs = null;
+  if (algorithmConfigs !== null) {
+    pyAlgorithmConfigs = pyodide.toPy(algorithmConfigs);
+  }
   pyodide.globals.set("PY_SLICE_AXIS", axis);
   pyodide.globals.set("PY_SLICE_VALUE", value);
+  pyodide.globals.set("PY_ALGORITHM_CONFIGS", pyAlgorithmConfigs);
   pyodide.globals.set("predict_progress_callback", pyodide.toPy((index, total, name) => {
     postStatus(`結果を計算中... (${index + 1}/${total}) ${name}`);
   }));
@@ -103,12 +112,21 @@ from compare_interpolation import predict_session_async
 slice_axis = globals().get("PY_SLICE_AXIS") or "z"
 slice_value = globals().get("PY_SLICE_VALUE")
 cb = globals().get("predict_progress_callback")
-json.dumps(await predict_session_async(slice_axis=slice_axis, slice_value=slice_value, progress_callback=cb), ensure_ascii=False)`);
+algo_configs_raw = globals().get("PY_ALGORITHM_CONFIGS")
+if algo_configs_raw is not None:
+    algo_configs = algo_configs_raw.to_py() if hasattr(algo_configs_raw, "to_py") else [c.to_py() if hasattr(c, "to_py") else c for c in algo_configs_raw]
+else:
+    algo_configs = None
+json.dumps(await predict_session_async(slice_axis=slice_axis, slice_value=slice_value, progress_callback=cb, algorithm_configs=algo_configs), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {
     pyodide.globals.set("PY_SLICE_AXIS", null);
     pyodide.globals.set("PY_SLICE_VALUE", null);
+    pyodide.globals.set("PY_ALGORITHM_CONFIGS", null);
     pyodide.globals.set("predict_progress_callback", null);
+    if (pyAlgorithmConfigs && typeof pyAlgorithmConfigs.destroy === "function") {
+      pyAlgorithmConfigs.destroy();
+    }
   }
 }
 
@@ -116,18 +134,24 @@ async function handlePredictLine(payload) {
   const pyodide = await ensurePyodide();
   const axis = payload && payload.lineAxis ? payload.lineAxis : "z";
   const fixed = payload && payload.fixedValues ? payload.fixedValues : null;
+  const algorithmConfigs = payload && Array.isArray(payload.algorithmConfigs) ? payload.algorithmConfigs : null;
   const resolution =
     payload && Number.isFinite(payload.lineResolution)
       ? Number(payload.lineResolution)
       : null;
   let pyFixed = null;
+  let pyAlgorithmConfigs = null;
   if (fixed !== null) {
     pyFixed = pyodide.toPy(fixed);
+  }
+  if (algorithmConfigs !== null) {
+    pyAlgorithmConfigs = pyodide.toPy(algorithmConfigs);
   }
   try {
     pyodide.globals.set("PY_LINE_AXIS", axis);
     pyodide.globals.set("PY_FIXED_AXES", pyFixed);
     pyodide.globals.set("PY_LINE_RESOLUTION", resolution);
+    pyodide.globals.set("PY_ALGORITHM_CONFIGS", pyAlgorithmConfigs);
     pyodide.globals.set("predict_progress_callback", pyodide.toPy((index, total, name) => {
       postStatus(`結果を計算中... (${index + 1}/${total}) ${name}`);
     }));
@@ -140,15 +164,24 @@ if fixed_candidate is not None:
     fixed_values = fixed_candidate
 line_resolution = globals().get("PY_LINE_RESOLUTION")
 cb = globals().get("predict_progress_callback")
-json.dumps(await predict_line_session_async(varying_axis=line_axis, fixed_values=fixed_values, line_resolution=line_resolution, progress_callback=cb), ensure_ascii=False)`);
+algo_configs_raw = globals().get("PY_ALGORITHM_CONFIGS")
+if algo_configs_raw is not None:
+    algo_configs = algo_configs_raw.to_py() if hasattr(algo_configs_raw, "to_py") else [c.to_py() if hasattr(c, "to_py") else c for c in algo_configs_raw]
+else:
+    algo_configs = None
+json.dumps(await predict_line_session_async(varying_axis=line_axis, fixed_values=fixed_values, line_resolution=line_resolution, progress_callback=cb, algorithm_configs=algo_configs), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {
     pyodide.globals.set("PY_LINE_AXIS", null);
     pyodide.globals.set("PY_FIXED_AXES", null);
     pyodide.globals.set("PY_LINE_RESOLUTION", null);
+    pyodide.globals.set("PY_ALGORITHM_CONFIGS", null);
     pyodide.globals.set("predict_progress_callback", null);
     if (pyFixed && typeof pyFixed.destroy === "function") {
       pyFixed.destroy();
+    }
+    if (pyAlgorithmConfigs && typeof pyAlgorithmConfigs.destroy === "function") {
+      pyAlgorithmConfigs.destroy();
     }
   }
 }

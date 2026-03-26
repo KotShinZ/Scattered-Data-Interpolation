@@ -1624,6 +1624,7 @@ def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
     If None or empty, all algorithms are created with defaults.
     """
     config_map: Dict[str, Any] = {}
+    has_explicit_configs = bool(algorithm_configs)
     if algorithm_configs:
         for c in algorithm_configs:
             algo_id = c.get("id") if isinstance(c, dict) else None
@@ -1633,7 +1634,7 @@ def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
     def enabled(algo_id: str) -> bool:
         c = config_map.get(algo_id)
         if c is None:
-            return True
+            return not has_explicit_configs
         val = c.get("enabled", True) if isinstance(c, dict) else True
         return bool(val)
 
@@ -2034,6 +2035,22 @@ def serialize_method_summaries(methods: Sequence[TrainedMethod]) -> List[Dict[st
     return payload
 
 
+def resolve_prediction_methods(
+    session: ComparisonSession,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
+) -> List[TrainedMethod]:
+    if not algorithm_configs:
+        return session.methods
+
+    enabled_names = {
+        interpolator.name for interpolator in create_interpolators(algorithm_configs)
+    }
+    if not enabled_names:
+        return []
+
+    return [method for method in session.methods if method.method in enabled_names]
+
+
 def serialize_line_results(results: List[LineSliceResult]) -> List[Dict[str, object]]:
     payload: List[Dict[str, object]] = []
     for item in results:
@@ -2058,6 +2075,7 @@ def compute_prediction(
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[EvaluationResult], str, float]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (slice_axis or "z").lower()
@@ -2090,9 +2108,10 @@ def compute_prediction(
     axis1_values = session.grid_axes[axis1_index][:]
     axis2_values = session.grid_axes[axis2_index][:]
 
+    selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[EvaluationResult] = []
-    total_count = len(session.methods)
-    for method_index, method in enumerate(session.methods):
+    total_count = len(selected_methods)
+    for method_index, method in enumerate(selected_methods):
         if progress_callback:
             progress_callback(method_index, total_count, method.method)
         slice_matrix: List[List[float]] = []
@@ -2141,6 +2160,7 @@ async def compute_prediction_async(
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[EvaluationResult], str, float]:
     import asyncio
 
@@ -2175,9 +2195,10 @@ async def compute_prediction_async(
     axis1_values = session.grid_axes[axis1_index][:]
     axis2_values = session.grid_axes[axis2_index][:]
 
+    selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[EvaluationResult] = []
-    total_count = len(session.methods)
-    for method_index, method in enumerate(session.methods):
+    total_count = len(selected_methods)
+    for method_index, method in enumerate(selected_methods):
         if progress_callback:
             progress_callback(method_index, total_count, method.method)
         await asyncio.sleep(0.02)
@@ -2238,6 +2259,7 @@ def compute_line_predictions(
     fixed_values: Optional[Dict[str, float]] = None,
     line_resolution: Optional[int] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (varying_axis or "z").lower()
@@ -2275,9 +2297,10 @@ def compute_line_predictions(
         coords_template[axis_index] = candidate
         resolved_fixed[label_lower] = candidate
 
+    selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[LineSliceResult] = []
-    total_count = len(session.methods)
-    for method_index, method in enumerate(session.methods):
+    total_count = len(selected_methods)
+    for method_index, method in enumerate(selected_methods):
         if progress_callback:
             progress_callback(method_index, total_count, method.method)
         predicted_values: List[float] = []
@@ -2321,6 +2344,7 @@ async def compute_line_predictions_async(
     fixed_values: Optional[Dict[str, float]] = None,
     line_resolution: Optional[int] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     import asyncio
 
@@ -2360,9 +2384,10 @@ async def compute_line_predictions_async(
         coords_template[axis_index] = candidate
         resolved_fixed[label_lower] = candidate
 
+    selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[LineSliceResult] = []
-    total_count = len(session.methods)
-    for method_index, method in enumerate(session.methods):
+    total_count = len(selected_methods)
+    for method_index, method in enumerate(selected_methods):
         if progress_callback:
             progress_callback(method_index, total_count, method.method)
         await asyncio.sleep(0.02)
@@ -2500,13 +2525,15 @@ def predict_session(
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     results, normalized_axis, resolved_value = compute_prediction(
-        active_session, slice_axis, slice_value, progress_callback=progress_callback
+        active_session, slice_axis, slice_value, progress_callback=progress_callback, algorithm_configs=algorithm_configs
     )
 
     dataset_payload = build_dataset_payload(
@@ -2534,11 +2561,13 @@ def predict_line_session(
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     (
         line_results,
         normalized_axis,
@@ -2550,6 +2579,7 @@ def predict_line_session(
         fixed_values,
         line_resolution=line_resolution,
         progress_callback=progress_callback,
+        algorithm_configs=algorithm_configs,
     )
 
     dataset_payload = build_dataset_payload(
@@ -2565,7 +2595,7 @@ def predict_line_session(
         "skipped": active_session.skipped,
         "line_axis": normalized_axis,
         "fixed_axes": resolved_fixed,
-        "summaries": serialize_method_summaries(active_session.methods),
+        "summaries": serialize_method_summaries(selected_methods),
         "line_resolution": resolved_resolution,
     }
 
@@ -2576,13 +2606,15 @@ async def predict_session_async(
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     results, normalized_axis, resolved_value = await compute_prediction_async(
-        active_session, slice_axis, slice_value, progress_callback=progress_callback
+        active_session, slice_axis, slice_value, progress_callback=progress_callback, algorithm_configs=algorithm_configs
     )
 
     dataset_payload = build_dataset_payload(
@@ -2610,11 +2642,13 @@ async def predict_line_session_async(
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, object]:
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     (
         line_results,
         normalized_axis,
@@ -2626,6 +2660,7 @@ async def predict_line_session_async(
         fixed_values,
         line_resolution=line_resolution,
         progress_callback=progress_callback,
+        algorithm_configs=algorithm_configs,
     )
 
     dataset_payload = build_dataset_payload(
@@ -2641,7 +2676,7 @@ async def predict_line_session_async(
         "skipped": active_session.skipped,
         "line_axis": normalized_axis,
         "fixed_axes": resolved_fixed,
-        "summaries": serialize_method_summaries(active_session.methods),
+        "summaries": serialize_method_summaries(selected_methods),
         "line_resolution": resolved_resolution,
     }
 

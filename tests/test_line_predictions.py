@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
 
-from docs.compare_interpolation import fit_session, predict_line_session
+from docs.compare_interpolation import (
+    create_interpolators,
+    fit_session,
+    predict_line_session,
+    predict_line_session_async,
+    predict_session,
+)
 
 
 class LinePredictionSessionTests(unittest.TestCase):
@@ -72,6 +79,107 @@ class LinePredictionSessionTests(unittest.TestCase):
         expected_length = max(5, requested_resolution)
         self.assertEqual(len(axis_values), expected_length)
         self.assertEqual(result["line_resolution"], expected_length)
+
+    def test_predict_session_filters_to_selected_algorithms(self) -> None:
+        session = fit_session(dataset=self.dataset, grid_size=4, test_ratio=0.25)
+
+        result = predict_session(
+            session=session,
+            slice_axis="z",
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["method"], "Inverse Distance Weighting")
+
+    def test_predict_line_session_filters_to_selected_algorithms(self) -> None:
+        session = fit_session(dataset=self.dataset, grid_size=4, test_ratio=0.25)
+
+        result = predict_line_session(
+            session=session,
+            varying_axis="x",
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        self.assertEqual(len(result["line_results"]), 1)
+        self.assertEqual(result["line_results"][0]["method"], "Inverse Distance Weighting")
+        self.assertEqual(len(result["summaries"]), 1)
+        self.assertEqual(result["summaries"][0]["method"], "Inverse Distance Weighting")
+
+    def test_predict_line_session_async_filters_summaries_to_selected_algorithms(self) -> None:
+        session = fit_session(dataset=self.dataset, grid_size=4, test_ratio=0.25)
+
+        result = asyncio.run(
+            predict_line_session_async(
+                session=session,
+                varying_axis="x",
+                algorithm_configs=[
+                    {
+                        "id": "IDW",
+                        "enabled": True,
+                        "params": {"power": 2.0},
+                    }
+                ],
+            )
+        )
+
+        self.assertEqual(len(result["line_results"]), 1)
+        self.assertEqual(result["line_results"][0]["method"], "Inverse Distance Weighting")
+        self.assertEqual(len(result["summaries"]), 1)
+        self.assertEqual(result["summaries"][0]["method"], "Inverse Distance Weighting")
+
+    def test_fit_session_uses_only_explicitly_selected_algorithms(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                },
+                {
+                    "id": "NearestNeighbor",
+                    "enabled": False,
+                    "params": {},
+                },
+                {
+                    "id": "KNNUniform",
+                    "enabled": False,
+                    "params": {"k": 4},
+                },
+            ],
+        )
+
+        self.assertEqual(len(session.methods), 1)
+        self.assertEqual(session.methods[0].method, "Inverse Distance Weighting")
+
+    def test_create_interpolators_uses_only_explicitly_selected_algorithms(self) -> None:
+        interpolators = create_interpolators(
+            [
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 3.0},
+                }
+            ]
+        )
+
+        self.assertEqual(len(interpolators), 1)
+        self.assertEqual(interpolators[0].name, "Inverse Distance Weighting")
 
 
 if __name__ == "__main__":  # pragma: no cover

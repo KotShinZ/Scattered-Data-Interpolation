@@ -2353,6 +2353,7 @@
             lineAxis: axis,
             fixedValues: fixedPayload,
             lineResolution: getLineResolutionPayload(),
+            algorithmConfigs: currentAlgoConfigs,
           });
           latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
           latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];

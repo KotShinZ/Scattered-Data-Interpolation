@@ -2030,6 +2030,7 @@
           const result = await callWorker("predictPlane", {
             sliceAxis: chosenAxis,
             sliceValue,
+            algorithmConfigs: currentAlgoConfigs,
           });
           latestResults = Array.isArray(result.results) ? result.results : [];
           latestDataset = result.dataset || null;
