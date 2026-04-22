@@ -1015,6 +1015,8 @@
       let defaultPointRange = null;
       let currentPointRange = null;
       let pointRangeDirty = false;
+      let plotRerenderTimer = null;
+      let planeModalRenderTimer = null;
 
       let storedSelection = datasetStore ? datasetStore.load() : null;
 
@@ -1090,13 +1092,17 @@
       function clearVisualizations() {
         latestResults = [];
         latestDataset = null;
+        cancelScheduledPlotRerender();
+        cancelScheduledPlaneModalRender();
         renderTableRows([]);
         if (chartContainer) {
           chartContainer.textContent = "チャートは結果計算後に表示されます。";
         }
         if (plotsContainer) {
+          purgePlotlyChartsIn(plotsContainer);
           plotsContainer.textContent = "3Dグラフは結果計算後に表示されます。";
         }
+        purgePlotlyChart(planeModalPlotEl);
         if (skippedContainer) {
           skippedContainer.hidden = true;
           skippedContainer.textContent = "";
@@ -1550,12 +1556,19 @@
 
       function handlePointRangeInput() {
         pointRangeDirty = true;
-        const range = readPointRangeInputs();
-        if (!range) {
+      }
+
+      function commitPendingPointRangeSettings() {
+        if (!pointRangeDirty) {
           return;
         }
-        currentPointRange = range;
-        rerenderPlotsForRangeChange();
+        const range = readPointRangeInputs();
+        if (range) {
+          currentPointRange = cloneRange(range);
+        }
+        pointRangeDirty = false;
+        applyPointRangeInputs(getActivePointRange());
+        schedulePlotRerender(true);
       }
 
       function renderTableRows(results) {
@@ -1622,6 +1635,88 @@
           return [];
         }
         return traces.map((trace) => JSON.parse(JSON.stringify(trace)));
+      }
+
+      function purgePlotlyChart(target) {
+        if (!target || typeof Plotly === "undefined" || typeof Plotly.purge !== "function") {
+          return;
+        }
+        try {
+          Plotly.purge(target);
+        } catch (error) {
+          console.warn("Failed to purge Plotly chart.", error);
+        }
+      }
+
+      function purgePlotlyChartsIn(container) {
+        if (!container) {
+          return;
+        }
+        container.querySelectorAll(".js-plotly-plot").forEach((plotEl) => {
+          purgePlotlyChart(plotEl);
+        });
+      }
+
+      function renderPlotlyFigure(target, traces, layout, config) {
+        if (!target || typeof Plotly === "undefined") {
+          return;
+        }
+        if (
+          target.classList.contains("js-plotly-plot") &&
+          typeof Plotly.react === "function"
+        ) {
+          Plotly.react(target, traces, layout, config);
+          return;
+        }
+        Plotly.newPlot(target, traces, layout, config);
+      }
+
+      function cancelScheduledPlotRerender() {
+        if (plotRerenderTimer === null) {
+          return;
+        }
+        window.clearTimeout(plotRerenderTimer);
+        plotRerenderTimer = null;
+      }
+
+      function schedulePlotRerender(immediate = false) {
+        if (!latestResults.length || !latestDataset) {
+          cancelScheduledPlotRerender();
+          return;
+        }
+        cancelScheduledPlotRerender();
+        if (immediate) {
+          render3DPlots(latestResults, latestDataset);
+          return;
+        }
+        plotRerenderTimer = window.setTimeout(() => {
+          plotRerenderTimer = null;
+          render3DPlots(latestResults, latestDataset);
+        }, 120);
+      }
+
+      function cancelScheduledPlaneModalRender() {
+        if (planeModalRenderTimer === null) {
+          return;
+        }
+        window.clearTimeout(planeModalRenderTimer);
+        planeModalRenderTimer = null;
+      }
+
+      function schedulePlaneModalRender(immediate = false) {
+        if (!planeModalContext || !planeModalPlotEl) {
+          cancelScheduledPlaneModalRender();
+          return;
+        }
+        cancelScheduledPlaneModalRender();
+        if (immediate) {
+          renderPlaneModalPlot();
+          return;
+        }
+        planeModalRenderTimer = window.setTimeout(() => {
+          planeModalRenderTimer = null;
+          renderPlaneModalPlot();
+        }, 80);
       }
 
       function computeRangeFromValues(values) {
@@ -1796,6 +1891,7 @@
         if (!planeModalContext || !planeModalPlotEl || typeof Plotly === "undefined") {
           return;
         }
+        cancelScheduledPlaneModalRender();
         const layout = JSON.parse(JSON.stringify(planeModalContext.layout || {}));
         layout.height = Math.max(planeModalPlotEl.clientHeight, 520);
         const scene = layout.scene || {};
@@ -1814,7 +1910,7 @@
             autorange: false,
           });
         }
-        Plotly.newPlot(planeModalPlotEl, cloneTraces(planeModalContext.traces), layout, {
+        renderPlotlyFigure(planeModalPlotEl, cloneTraces(planeModalContext.traces), layout, {
           responsive: true,
           displaylogo: false,
           scrollZoom: true,
@@ -1823,6 +1919,7 @@
       }
 
       function openPlaneSettingsModal() {
+        applyPointRangeInputs(getActivePointRange());
         if (planeSettingsBackdrop) {
           planeSettingsBackdrop.classList.add("open");
         }
@@ -1833,6 +1930,12 @@
       }
 
       function closePlaneSettingsModal() {
+        const wasOpen = Boolean(
+          planeSettingsModal && planeSettingsModal.classList.contains("open")
+        );
+        if (wasOpen) {
+          commitPendingPointRangeSettings();
+        }
         if (planeSettingsModal) {
           planeSettingsModal.classList.remove("open");
           planeSettingsModal.setAttribute("aria-hidden", "true");
@@ -1878,6 +1981,7 @@
       }
 
       function closePlaneModal() {
+        cancelScheduledPlaneModalRender();
         if (planeModalEl) {
           planeModalEl.classList.remove("open");
           planeModalEl.setAttribute("aria-hidden", "true");
@@ -1892,11 +1996,13 @@
       }
 
       function render3DPlots(results, dataset) {
+        cancelScheduledPlotRerender();
         if (typeof Plotly === "undefined") {
           plotsContainer.textContent = "Plotly の読み込みに失敗しました。ページを再読み込みしてください。";
           return;
         }
 
+        purgePlotlyChartsIn(plotsContainer);
         plotsContainer.innerHTML = "";
         if (!results.length) {
           plotsContainer.textContent = "表示できる結果がありません。";
@@ -1982,7 +2088,7 @@
 
           const compactLayout = JSON.parse(JSON.stringify(payload.layout || {}));
 
-          Plotly.newPlot(plotDiv, cloneTraces(payload.traces), compactLayout, {
+          renderPlotlyFigure(plotDiv, cloneTraces(payload.traces), compactLayout, {
             responsive: true,
             displaylogo: false,
             modeBarButtonsToRemove: ["toImage"],
@@ -2048,6 +2154,7 @@
           if (latestDataset && latestResults.length) {
             render3DPlots(latestResults, latestDataset);
           } else {
+            purgePlotlyChartsIn(plotsContainer);
             plotsContainer.textContent = "3Dグラフを生成できませんでした。";
           }
           if (sliceAxisSelect) {
@@ -2170,10 +2277,10 @@
         .filter(Boolean)
         .forEach((input) => {
           input.addEventListener("input", () => {
-            renderPlaneModalPlot();
+            schedulePlaneModalRender(false);
           });
           input.addEventListener("change", () => {
-            renderPlaneModalPlot();
+            schedulePlaneModalRender(true);
           });
         });
 
@@ -2431,12 +2538,12 @@
           }
           if (surfaceOcclusionToggle.checked !== latestOcclusionPreference) {
             latestOcclusionPreference = surfaceOcclusionToggle.checked;
-            render3DPlots(latestResults, latestDataset);
+            schedulePlotRerender(true);
           }
         });
       }
       if (pointSizeInput) {
-        const handlePointSizeChange = () => {
+        const handlePointSizeChange = (immediate = false) => {
           if (!pointSizeInput) {
             return;
           }
@@ -2449,10 +2556,10 @@
           if (!latestResults.length || !latestDataset) {
             return;
           }
-          render3DPlots(latestResults, latestDataset);
+          schedulePlotRerender(immediate);
         };
-        pointSizeInput.addEventListener("input", handlePointSizeChange);
-        pointSizeInput.addEventListener("change", handlePointSizeChange);
+        pointSizeInput.addEventListener("input", () => handlePointSizeChange(false));
+        pointSizeInput.addEventListener("change", () => handlePointSizeChange(true));
       }
       Object.values(pointRangeInputs).forEach((controls) => {
         if (!controls) {
