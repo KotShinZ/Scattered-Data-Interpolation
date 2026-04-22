@@ -6,6 +6,10 @@ function postStatus(message) {
   self.postMessage({ type: "status", message });
 }
 
+function postDebug(label, payload) {
+  self.postMessage({ type: "debug", label, payload });
+}
+
 function serializeError(error) {
   if (error instanceof Error) {
     return { message: error.message, stack: error.stack };
@@ -106,6 +110,11 @@ async function handlePredictPlane(payload) {
   pyodide.globals.set("predict_progress_callback", pyodide.toPy((index, total, name) => {
     postStatus(`結果を計算中... (${index + 1}/${total}) ${name}`);
   }));
+  postDebug("handlePredictPlane", {
+    axis,
+    value,
+    algorithmConfigs,
+  });
   try {
     const resultJson = await pyodide.runPythonAsync(`import json
 from compare_interpolation import predict_session_async
@@ -117,6 +126,7 @@ if algo_configs_raw is not None:
     algo_configs = algo_configs_raw.to_py() if hasattr(algo_configs_raw, "to_py") else [c.to_py() if hasattr(c, "to_py") else c for c in algo_configs_raw]
 else:
     algo_configs = None
+print(f"DEBUG: slice_axis={slice_axis}, slice_value={slice_value}, algo_configs={algo_configs}")
 json.dumps(await predict_session_async(slice_axis=slice_axis, slice_value=slice_value, progress_callback=cb, algorithm_configs=algo_configs), ensure_ascii=False)`);
     return JSON.parse(resultJson);
   } finally {

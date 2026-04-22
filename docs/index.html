@@ -1199,6 +1199,10 @@
           statusEl.textContent = data.message;
           return;
         }
+        if (data.type === "debug") {
+          console.log(`[worker:${data.label || "debug"}]`, data.payload);
+          return;
+        }
         if (!data.id) {
           return;
         }
@@ -2027,6 +2031,7 @@
           const chosenAxis = sliceAxisSelect ? sliceAxisSelect.value || "z" : "z";
           const rawValue = sliceValueInput ? Number.parseFloat(sliceValueInput.value) : NaN;
           const sliceValue = Number.isFinite(rawValue) ? rawValue : null;
+          console.log(currentAlgoConfigs);
           const result = await callWorker("predictPlane", {
             sliceAxis: chosenAxis,
             sliceValue,

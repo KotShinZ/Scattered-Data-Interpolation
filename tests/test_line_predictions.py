@@ -7,7 +7,9 @@ import asyncio
 
 from docs.compare_interpolation import (
     create_interpolators,
+    export_session,
     fit_session,
+    import_session,
     predict_line_session,
     predict_line_session_async,
     predict_session,
@@ -180,6 +182,30 @@ class LinePredictionSessionTests(unittest.TestCase):
 
         self.assertEqual(len(interpolators), 1)
         self.assertEqual(interpolators[0].name, "Inverse Distance Weighting")
+
+    def test_exported_and_imported_session_preserves_selected_algorithm_ids(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        exported = export_session(session)
+        restored = import_session(exported)
+        result = predict_session(session=restored, slice_axis="z")
+
+        self.assertEqual(len(restored.methods), 1)
+        self.assertEqual(restored.methods[0].algorithm_id, "IDW")
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["method"], "Inverse Distance Weighting")
 
 
 if __name__ == "__main__":  # pragma: no cover

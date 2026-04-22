@@ -1471,6 +1471,7 @@ class EvaluationResult:
 @dataclass
 class TrainedMethod:
     interpolator: Interpolator
+    algorithm_id: Optional[str]
     method: str
     smoothness_class: str
     fit_time_ms: float = 0.0
@@ -1508,6 +1509,7 @@ class ComparisonSession:
     grid_size: int
     methods: List[TrainedMethod]
     skipped: List[Tuple[str, str]]
+    algorithm_configs: Optional[List[Dict[str, Any]]] = None
     normalize: bool = False
     norm_means: List[float] = field(default_factory=list)
     norm_stds: List[float] = field(default_factory=list)
@@ -1614,6 +1616,48 @@ def evaluate_interpolator(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_algorithm_configs(
+    algorithm_configs: Optional[Sequence[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
+    if not algorithm_configs:
+        return None
+
+    normalized: List[Dict[str, Any]] = []
+    for config in algorithm_configs:
+        if not isinstance(config, dict):
+            continue
+        algo_id = config.get("id")
+        if not isinstance(algo_id, str) or not algo_id:
+            continue
+        params = config.get("params", {})
+        normalized.append(
+            {
+                "id": algo_id,
+                "enabled": bool(config.get("enabled", True)),
+                "params": params if isinstance(params, dict) else {},
+            }
+        )
+    return normalized or None
+
+
+def _enabled_algorithm_ids(
+    algorithm_configs: Optional[Sequence[Dict[str, Any]]],
+) -> Optional[set[str]]:
+    normalized = _normalize_algorithm_configs(algorithm_configs)
+    if normalized is None:
+        return None
+    return {
+        config["id"]
+        for config in normalized
+        if config.get("enabled", True)
+    }
+
+
+def _tag_interpolator(interpolator: Interpolator, algorithm_id: str) -> Interpolator:
+    setattr(interpolator, "_algorithm_id", algorithm_id)
+    return interpolator
+
+
 def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
     """Create interpolators, optionally filtered/configured by algorithm_configs.
 
@@ -1623,10 +1667,11 @@ def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
         params   - dict of hyperparameter overrides
     If None or empty, all algorithms are created with defaults.
     """
+    normalized_configs = _normalize_algorithm_configs(algorithm_configs)
     config_map: Dict[str, Any] = {}
-    has_explicit_configs = bool(algorithm_configs)
-    if algorithm_configs:
-        for c in algorithm_configs:
+    has_explicit_configs = bool(normalized_configs)
+    if normalized_configs:
+        for c in normalized_configs:
             algo_id = c.get("id") if isinstance(c, dict) else None
             if algo_id:
                 config_map[algo_id] = c
@@ -1648,107 +1693,107 @@ def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
     result: List[Interpolator] = []
 
     if enabled("NearestNeighbor"):
-        result.append(NearestNeighborInterpolator())
+        result.append(_tag_interpolator(NearestNeighborInterpolator(), "NearestNeighbor"))
 
     if enabled("KNNUniform"):
         q = p("KNNUniform")
-        result.append(KNNUniformInterpolator(k=int(q.get("k", 4))))
+        result.append(_tag_interpolator(KNNUniformInterpolator(k=int(q.get("k", 4))), "KNNUniform"))
 
     if enabled("IDW"):
         q = p("IDW")
-        result.append(InverseDistanceWeightingInterpolator(
+        result.append(_tag_interpolator(InverseDistanceWeightingInterpolator(
             power=float(q.get("power", 2.0)),
-        ))
+        ), "IDW"))
 
     if enabled("LinearRegression"):
-        result.append(LinearRegressionInterpolator())
+        result.append(_tag_interpolator(LinearRegressionInterpolator(), "LinearRegression"))
 
     if enabled("RBF_linear"):
         q = p("RBF_linear")
-        result.append(RBFInterpolator("linear", regularization=float(q.get("regularization", 1e-6))))
+        result.append(_tag_interpolator(RBFInterpolator("linear", regularization=float(q.get("regularization", 1e-6))), "RBF_linear"))
 
     if enabled("RBF_cubic"):
         q = p("RBF_cubic")
-        result.append(RBFInterpolator("cubic", regularization=float(q.get("regularization", 1e-6))))
+        result.append(_tag_interpolator(RBFInterpolator("cubic", regularization=float(q.get("regularization", 1e-6))), "RBF_cubic"))
 
     if enabled("RBF_quintic"):
         q = p("RBF_quintic")
-        result.append(RBFInterpolator("quintic", regularization=float(q.get("regularization", 1e-6))))
+        result.append(_tag_interpolator(RBFInterpolator("quintic", regularization=float(q.get("regularization", 1e-6))), "RBF_quintic"))
 
     if enabled("RBF_gaussian"):
         q = p("RBF_gaussian")
-        result.append(RBFInterpolator(
+        result.append(_tag_interpolator(RBFInterpolator(
             "gaussian",
             epsilon=float(q.get("epsilon", 1.5)),
             regularization=float(q.get("regularization", 1e-6)),
-        ))
+        ), "RBF_gaussian"))
 
     if enabled("RBF_multiquadric"):
         q = p("RBF_multiquadric")
-        result.append(RBFInterpolator(
+        result.append(_tag_interpolator(RBFInterpolator(
             "multiquadric",
             epsilon=float(q.get("epsilon", 1.0)),
             regularization=float(q.get("regularization", 1e-6)),
-        ))
+        ), "RBF_multiquadric"))
 
     if enabled("RBF_inverse_multiquadric"):
         q = p("RBF_inverse_multiquadric")
-        result.append(RBFInterpolator(
+        result.append(_tag_interpolator(RBFInterpolator(
             "inverse_multiquadric",
             epsilon=float(q.get("epsilon", 1.0)),
             regularization=float(q.get("regularization", 1e-6)),
-        ))
+        ), "RBF_inverse_multiquadric"))
 
     if enabled("ThinPlateSpline"):
         q = p("ThinPlateSpline")
-        result.append(ThinPlateSplineInterpolator(regularization=float(q.get("regularization", 1e-6))))
+        result.append(_tag_interpolator(ThinPlateSplineInterpolator(regularization=float(q.get("regularization", 1e-6))), "ThinPlateSpline"))
 
     if enabled("GaussianProcess"):
         q = p("GaussianProcess")
-        result.append(GaussianProcessInterpolator(
+        result.append(_tag_interpolator(GaussianProcessInterpolator(
             length_scale=float(q.get("length_scale", 0.35)),
             alpha=float(q.get("alpha", 1e-4)),
-        ))
+        ), "GaussianProcess"))
 
     if enabled("OrdinaryKriging"):
         q = p("OrdinaryKriging")
-        result.append(OrdinaryKrigingInterpolator(
+        result.append(_tag_interpolator(OrdinaryKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.5)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "OrdinaryKriging"))
 
     if enabled("UniversalKriging"):
-        result.append(UniversalKrigingInterpolator())
+        result.append(_tag_interpolator(UniversalKrigingInterpolator(), "UniversalKriging"))
 
     if enabled("ExponentialKriging"):
         q = p("ExponentialKriging")
-        result.append(ExponentialKrigingInterpolator(
+        result.append(_tag_interpolator(ExponentialKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.45)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "ExponentialKriging"))
 
     if enabled("GaussianKriging"):
         q = p("GaussianKriging")
-        result.append(GaussianKrigingInterpolator(
+        result.append(_tag_interpolator(GaussianKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.4)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "GaussianKriging"))
 
     if enabled("PowerKriging"):
         q = p("PowerKriging")
-        result.append(PowerKrigingInterpolator(
+        result.append(_tag_interpolator(PowerKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             power=float(q.get("power", 1.5)),
             scale=float(q.get("scale", 0.5)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "PowerKriging"))
 
     if enabled("AnisotropicKriging"):
         q = p("AnisotropicKriging")
-        result.append(AnisotropicKrigingInterpolator(
+        result.append(_tag_interpolator(AnisotropicKrigingInterpolator(
             ranges=(
                 float(q.get("range_x", 0.4)),
                 float(q.get("range_y", 0.25)),
@@ -1756,114 +1801,114 @@ def create_interpolators(algorithm_configs=None) -> List[Interpolator]:
             ),
             sill=float(q.get("sill", 1.0)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "AnisotropicKriging"))
 
     if enabled("QuadraticDriftKriging"):
-        result.append(QuadraticDriftKrigingInterpolator())
+        result.append(_tag_interpolator(QuadraticDriftKrigingInterpolator(), "QuadraticDriftKriging"))
 
     if enabled("LinearKriging"):
         q = p("LinearKriging")
-        result.append(LinearKrigingInterpolator(
+        result.append(_tag_interpolator(LinearKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.5)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "LinearKriging"))
 
     if enabled("CubicKriging"):
         q = p("CubicKriging")
-        result.append(CubicKrigingInterpolator(
+        result.append(_tag_interpolator(CubicKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.6)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "CubicKriging"))
 
     if enabled("RationalQuadraticKriging"):
         q = p("RationalQuadraticKriging")
-        result.append(RationalQuadraticKrigingInterpolator(
+        result.append(_tag_interpolator(RationalQuadraticKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.45)),
             alpha=float(q.get("alpha", 1.0)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "RationalQuadraticKriging"))
 
     if enabled("HoleEffectKriging"):
         q = p("HoleEffectKriging")
-        result.append(HoleEffectKrigingInterpolator(
+        result.append(_tag_interpolator(HoleEffectKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.35)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "HoleEffectKriging"))
 
     if enabled("Matern32Kriging"):
         q = p("Matern32Kriging")
-        result.append(Matern32KrigingInterpolator(
+        result.append(_tag_interpolator(Matern32KrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.4)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "Matern32Kriging"))
 
     if enabled("Matern52Kriging"):
         q = p("Matern52Kriging")
-        result.append(Matern52KrigingInterpolator(
+        result.append(_tag_interpolator(Matern52KrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.35)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "Matern52Kriging"))
 
     if enabled("LogarithmicKriging"):
         q = p("LogarithmicKriging")
-        result.append(LogarithmicKrigingInterpolator(
+        result.append(_tag_interpolator(LogarithmicKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.5)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "LogarithmicKriging"))
 
     if enabled("CauchyKriging"):
         q = p("CauchyKriging")
-        result.append(CauchyKrigingInterpolator(
+        result.append(_tag_interpolator(CauchyKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.45)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "CauchyKriging"))
 
     if enabled("StableKriging"):
         q = p("StableKriging")
-        result.append(StableKrigingInterpolator(
+        result.append(_tag_interpolator(StableKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             range_param=float(q.get("range_param", 0.4)),
             alpha=float(q.get("alpha", 1.2)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "StableKriging"))
 
     if enabled("SplineKriging"):
         q = p("SplineKriging")
-        result.append(SplineKrigingInterpolator(
+        result.append(_tag_interpolator(SplineKrigingInterpolator(
             sill=float(q.get("sill", 1.0)),
             scale=float(q.get("scale", 0.5)),
             nugget=float(q.get("nugget", 1e-4)),
-        ))
+        ), "SplineKriging"))
 
     if enabled("ModifiedShepard"):
         q = p("ModifiedShepard")
-        result.append(ModifiedShepardInterpolator(
+        result.append(_tag_interpolator(ModifiedShepardInterpolator(
             n_neighbors=int(q.get("n_neighbors", 9)),
             radius_factor=float(q.get("radius_factor", 2.0)),
             power=float(q.get("power", 2.0)),
-        ))
+        ), "ModifiedShepard"))
 
     if enabled("MLS_approx"):
         q = p("MLS_approx")
-        result.append(MovingLeastSquaresInterpolator(
+        result.append(_tag_interpolator(MovingLeastSquaresInterpolator(
             radius=float(q.get("radius", 0.5)),
             degree=int(q.get("degree", 2)),
-        ))
+        ), "MLS_approx"))
 
     if enabled("MLS_interpolating"):
         q = p("MLS_interpolating")
-        result.append(InterpolatingMLSInterpolator(
+        result.append(_tag_interpolator(InterpolatingMLSInterpolator(
             power=float(q.get("power", 4.0)),
             degree=int(q.get("degree", 2)),
-        ))
+        ), "MLS_interpolating"))
 
     return result
 
@@ -1926,6 +1971,7 @@ def fit_single_interpolator(
     fit_time_ms = (time.perf_counter() - _t0) * 1000.0
     return TrainedMethod(
         interpolator=interpolator,
+        algorithm_id=getattr(interpolator, "_algorithm_id", None),
         method=getattr(interpolator, "name", interpolator.__class__.__name__),
         smoothness_class=getattr(interpolator, "smoothness_class", ""),
         fit_time_ms=fit_time_ms,
@@ -2039,15 +2085,17 @@ def resolve_prediction_methods(
     session: ComparisonSession,
     algorithm_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[TrainedMethod]:
-    if not algorithm_configs:
+    enabled_ids = _enabled_algorithm_ids(algorithm_configs)
+    if enabled_ids is None:
         return session.methods
-
-    enabled_names = {
-        interpolator.name for interpolator in create_interpolators(algorithm_configs)
-    }
-    if not enabled_names:
+    if not enabled_ids:
         return []
-
+    selected_methods = [
+        method for method in session.methods if method.algorithm_id in enabled_ids
+    ]
+    if selected_methods:
+        return selected_methods
+    enabled_names = {interpolator.name for interpolator in create_interpolators(algorithm_configs)}
     return [method for method in session.methods if method.method in enabled_names]
 
 
@@ -2456,7 +2504,8 @@ def fit_session(
 
     methods: List[TrainedMethod] = []
     skipped: List[Tuple[str, str]] = []
-    interpolators = create_interpolators(algorithm_configs)
+    normalized_algorithm_configs = _normalize_algorithm_configs(algorithm_configs)
+    interpolators = create_interpolators(normalized_algorithm_configs)
     total_count = len(interpolators)
 
     for index, interpolator in enumerate(interpolators):
@@ -2466,7 +2515,9 @@ def fit_session(
 
         try:
             if normalize:
-                interpolator = NormalizingInterpolator(interpolator, norm_means, norm_stds)
+                wrapped = NormalizingInterpolator(interpolator, norm_means, norm_stds)
+                setattr(wrapped, "_algorithm_id", getattr(interpolator, "_algorithm_id", None))
+                interpolator = wrapped
             trained = fit_single_interpolator(interpolator, train[:])
             methods.append(trained)
         except ValueError as exc:
@@ -2480,6 +2531,7 @@ def fit_session(
         grid_size=grid_size,
         methods=methods,
         skipped=skipped,
+        algorithm_configs=normalized_algorithm_configs,
         normalize=normalize,
         norm_means=norm_means,
         norm_stds=norm_stds,
@@ -2611,6 +2663,8 @@ async def predict_session_async(
     active_session = session or ACTIVE_SESSION
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
+    
+    print("python:algorithm_configs", algorithm_configs)
 
     selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     results, normalized_axis, resolved_value = await compute_prediction_async(
@@ -2852,6 +2906,7 @@ def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, obj
         "grid_size": active_session.grid_size,
         "methods": [],
         "skipped": list(active_session.skipped),
+        "algorithm_configs": _normalize_algorithm_configs(active_session.algorithm_configs),
         "normalize": active_session.normalize,
         "norm_means": list(active_session.norm_means),
         "norm_stds": list(active_session.norm_stds),
@@ -2867,6 +2922,7 @@ def export_session(session: Optional[ComparisonSession] = None) -> Dict[str, obj
         )
         method_data = {
             "method": method.method,
+            "algorithm_id": method.algorithm_id,
             "smoothness_class": method.smoothness_class,
             "rmse": method.rmse,
             "gradient_smoothness": method.gradient_smoothness,
@@ -2982,6 +3038,7 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
     dataset = [(tuple(point), value) for point, value in exported["dataset"]]
 
     normalize = bool(exported.get("normalize", False))
+    algorithm_configs = _normalize_algorithm_configs(exported.get("algorithm_configs"))
     norm_means = list(exported.get("norm_means", []))
     norm_stds = list(exported.get("norm_stds", []))
 
@@ -2995,6 +3052,7 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
 
         trained = TrainedMethod(
             interpolator=interpolator,
+            algorithm_id=method_data.get("algorithm_id"),
             method=method_data["method"],
             smoothness_class=method_data["smoothness_class"],
             rmse=method_data["rmse"],
@@ -3017,6 +3075,7 @@ def import_session(exported: Dict[str, object]) -> ComparisonSession:
         grid_size=exported["grid_size"],
         methods=methods,
         skipped=list(exported["skipped"]),
+        algorithm_configs=algorithm_configs,
         normalize=normalize,
         norm_means=norm_means,
         norm_stds=norm_stds,
