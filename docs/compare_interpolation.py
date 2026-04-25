@@ -1518,6 +1518,49 @@ class ComparisonSession:
 ACTIVE_SESSION: Optional[ComparisonSession] = None
 
 
+def session_has_spatial_normalization(session: ComparisonSession) -> bool:
+    return _has_spatial_normalization(
+        session.normalize,
+        session.norm_means,
+        session.norm_stds,
+    )
+
+
+def session_axis_value_to_display(
+    session: ComparisonSession,
+    axis_index: int,
+    value: float,
+    *,
+    display_normalized: bool = True,
+) -> float:
+    if session_has_spatial_normalization(session) and display_normalized:
+        return normalize_axis_value(value, axis_index, session.norm_means, session.norm_stds)
+    return value
+
+
+def session_axis_value_to_query(
+    session: ComparisonSession,
+    axis_index: int,
+    value: float,
+    *,
+    display_normalized: bool = True,
+) -> float:
+    if session_has_spatial_normalization(session) and display_normalized:
+        return denormalize_axis_value(value, axis_index, session.norm_means, session.norm_stds)
+    return value
+
+
+def session_point_to_display(
+    session: ComparisonSession,
+    point: Point3D,
+    *,
+    display_normalized: bool = True,
+) -> Point3D:
+    if session_has_spatial_normalization(session) and display_normalized:
+        return normalize_spatial_point(point, session.norm_means, session.norm_stds)
+    return point
+
+
 def evaluate_interpolator(
     interpolator: Interpolator,
     train: List[Tuple[Point3D, float]],
@@ -1941,6 +1984,56 @@ def compute_spatial_normalization(
     return means, stds
 
 
+def _has_spatial_normalization(
+    normalize: bool,
+    means: Sequence[float],
+    stds: Sequence[float],
+) -> bool:
+    return bool(normalize and len(means) == 3 and len(stds) == 3)
+
+
+def normalize_axis_value(
+    value: float,
+    axis_index: int,
+    means: Sequence[float],
+    stds: Sequence[float],
+) -> float:
+    return (value - means[axis_index]) / stds[axis_index]
+
+
+def denormalize_axis_value(
+    value: float,
+    axis_index: int,
+    means: Sequence[float],
+    stds: Sequence[float],
+) -> float:
+    return value * stds[axis_index] + means[axis_index]
+
+
+def normalize_spatial_point(
+    point: Point3D,
+    means: Sequence[float],
+    stds: Sequence[float],
+) -> Point3D:
+    return (
+        normalize_axis_value(point[0], 0, means, stds),
+        normalize_axis_value(point[1], 1, means, stds),
+        normalize_axis_value(point[2], 2, means, stds),
+    )
+
+
+def denormalize_spatial_point(
+    point: Point3D,
+    means: Sequence[float],
+    stds: Sequence[float],
+) -> Point3D:
+    return (
+        denormalize_axis_value(point[0], 0, means, stds),
+        denormalize_axis_value(point[1], 1, means, stds),
+        denormalize_axis_value(point[2], 2, means, stds),
+    )
+
+
 def compute_grid_predictions(
     interpolator: Interpolator,
     grid_axes: Sequence[Sequence[float]],
@@ -2026,12 +2119,37 @@ def build_dataset_payload(
     dataset_list: Sequence[Tuple[Point3D, float]],
     dataset_source: str,
     axis_bounds: Sequence[Tuple[float, float]],
+    *,
+    normalize: bool = False,
+    norm_means: Optional[Sequence[float]] = None,
+    norm_stds: Optional[Sequence[float]] = None,
+    display_normalized: bool = True,
 ) -> Dict[str, object]:
+    means = list(norm_means or [])
+    stds = list(norm_stds or [])
+    points_payload = [list(point) for point, _ in dataset_list]
+    axis_bounds_payload = [list(bounds) for bounds in axis_bounds]
+    if _has_spatial_normalization(normalize, means, stds) and display_normalized:
+        points_payload = [
+            list(normalize_spatial_point(point, means, stds))
+            for point, _ in dataset_list
+        ]
+        axis_bounds_payload = [
+            [
+                normalize_axis_value(bounds[0], axis_index, means, stds),
+                normalize_axis_value(bounds[1], axis_index, means, stds),
+            ]
+            for axis_index, bounds in enumerate(axis_bounds)
+        ]
     return {
-        "points": [list(point) for point, _ in dataset_list],
+        "points": points_payload,
         "values": [value for _, value in dataset_list],
         "source": dataset_source,
-        "axis_bounds": list(axis_bounds),
+        "axis_bounds": axis_bounds_payload,
+        "normalize": bool(normalize),
+        "display_normalized": bool(display_normalized and _has_spatial_normalization(normalize, means, stds)),
+        "norm_means": means,
+        "norm_stds": stds,
     }
 
 
@@ -2124,17 +2242,18 @@ def compute_prediction(
     slice_value: Optional[float] = None,
     progress_callback=None,
     algorithm_configs: Optional[List[Dict[str, Any]]] = None,
+    display_normalized: bool = True,
 ) -> Tuple[List[EvaluationResult], str, float]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (slice_axis or "z").lower()
     drop_index = axis_lookup.get(normalized_axis, 2)
-    axis_values = session.grid_axes[drop_index][:]
-    if axis_values:
-        default_slice_value = axis_values[len(axis_values) // 2]
-        min_bound = axis_values[0]
-        max_bound = axis_values[-1]
+    axis_values_query = session.grid_axes[drop_index][:]
+    if axis_values_query:
+        default_slice_value_query = axis_values_query[len(axis_values_query) // 2]
+        min_bound = axis_values_query[0]
+        max_bound = axis_values_query[-1]
     else:
-        default_slice_value = 0.0
+        default_slice_value_query = 0.0
         min_bound = 0.0
         max_bound = 1.0
 
@@ -2143,18 +2262,47 @@ def compute_prediction(
         and isinstance(slice_value, (int, float))
         and math.isfinite(slice_value)
     ):
-        candidate = float(slice_value)
+        candidate = session_axis_value_to_query(
+            session,
+            drop_index,
+            float(slice_value),
+            display_normalized=display_normalized,
+        )
         if min_bound <= max_bound:
-            resolved_slice_value = max(min(candidate, max_bound), min_bound)
+            resolved_slice_value_query = max(min(candidate, max_bound), min_bound)
         else:
-            resolved_slice_value = candidate
+            resolved_slice_value_query = candidate
     else:
-        resolved_slice_value = default_slice_value
+        resolved_slice_value_query = default_slice_value_query
 
     keep_indices = [index for index in range(3) if index != drop_index]
     axis1_index, axis2_index = keep_indices
-    axis1_values = session.grid_axes[axis1_index][:]
-    axis2_values = session.grid_axes[axis2_index][:]
+    axis1_values_query = session.grid_axes[axis1_index][:]
+    axis2_values_query = session.grid_axes[axis2_index][:]
+    axis1_values_display = [
+        session_axis_value_to_display(
+            session,
+            axis1_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis1_values_query
+    ]
+    axis2_values_display = [
+        session_axis_value_to_display(
+            session,
+            axis2_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis2_values_query
+    ]
+    resolved_slice_value_display = session_axis_value_to_display(
+        session,
+        drop_index,
+        resolved_slice_value_query,
+        display_normalized=display_normalized,
+    )
 
     selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[EvaluationResult] = []
@@ -2165,13 +2313,13 @@ def compute_prediction(
         slice_matrix: List[List[float]] = []
         predict_count = 0
         _tp = time.perf_counter()
-        for axis2 in axis2_values:
+        for axis2 in axis2_values_query:
             row: List[float] = []
-            for axis1 in axis1_values:
+            for axis1 in axis1_values_query:
                 coords = [0.0, 0.0, 0.0]
                 coords[axis1_index] = axis1
                 coords[axis2_index] = axis2
-                coords[drop_index] = resolved_slice_value
+                coords[drop_index] = resolved_slice_value_query
                 row.append(method.interpolator.predict(tuple(coords)))
                 predict_count += 1
             slice_matrix.append(row)
@@ -2185,22 +2333,29 @@ def compute_prediction(
                 rmse=method.rmse,
                 gradient_smoothness=method.gradient_smoothness,
                 laplacian_smoothness=method.laplacian_smoothness,
-                grid_points=method.grid_points,
+                grid_points=[
+                    session_point_to_display(
+                        session,
+                        point,
+                        display_normalized=display_normalized,
+                    )
+                    for point in method.grid_points
+                ],
                 grid_values=method.grid_values,
                 slice_axis=AXIS_LABELS[drop_index],
-                slice_value=resolved_slice_value,
+                slice_value=resolved_slice_value_display,
                 slice_axis1_label=AXIS_LABELS[axis1_index],
                 slice_axis2_label=AXIS_LABELS[axis2_index],
                 slice_fixed_label=AXIS_LABELS[drop_index],
-                slice_axis1_values=axis1_values,
-                slice_axis2_values=axis2_values,
+                slice_axis1_values=axis1_values_display,
+                slice_axis2_values=axis2_values_display,
                 slice_matrix=slice_matrix,
                 fit_time_ms=method.fit_time_ms,
                 predict_time_ms=predict_time_ms,
             )
         )
 
-    return results, normalized_axis, resolved_slice_value
+    return results, normalized_axis, resolved_slice_value_display
 
 
 async def compute_prediction_async(
@@ -2209,19 +2364,20 @@ async def compute_prediction_async(
     slice_value: Optional[float] = None,
     progress_callback=None,
     algorithm_configs: Optional[List[Dict[str, Any]]] = None,
+    display_normalized: bool = True,
 ) -> Tuple[List[EvaluationResult], str, float]:
     import asyncio
 
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (slice_axis or "z").lower()
     drop_index = axis_lookup.get(normalized_axis, 2)
-    axis_values = session.grid_axes[drop_index][:]
-    if axis_values:
-        default_slice_value = axis_values[len(axis_values) // 2]
-        min_bound = axis_values[0]
-        max_bound = axis_values[-1]
+    axis_values_query = session.grid_axes[drop_index][:]
+    if axis_values_query:
+        default_slice_value_query = axis_values_query[len(axis_values_query) // 2]
+        min_bound = axis_values_query[0]
+        max_bound = axis_values_query[-1]
     else:
-        default_slice_value = 0.0
+        default_slice_value_query = 0.0
         min_bound = 0.0
         max_bound = 1.0
 
@@ -2230,18 +2386,47 @@ async def compute_prediction_async(
         and isinstance(slice_value, (int, float))
         and math.isfinite(slice_value)
     ):
-        candidate = float(slice_value)
+        candidate = session_axis_value_to_query(
+            session,
+            drop_index,
+            float(slice_value),
+            display_normalized=display_normalized,
+        )
         if min_bound <= max_bound:
-            resolved_slice_value = max(min(candidate, max_bound), min_bound)
+            resolved_slice_value_query = max(min(candidate, max_bound), min_bound)
         else:
-            resolved_slice_value = candidate
+            resolved_slice_value_query = candidate
     else:
-        resolved_slice_value = default_slice_value
+        resolved_slice_value_query = default_slice_value_query
 
     keep_indices = [index for index in range(3) if index != drop_index]
     axis1_index, axis2_index = keep_indices
-    axis1_values = session.grid_axes[axis1_index][:]
-    axis2_values = session.grid_axes[axis2_index][:]
+    axis1_values_query = session.grid_axes[axis1_index][:]
+    axis2_values_query = session.grid_axes[axis2_index][:]
+    axis1_values_display = [
+        session_axis_value_to_display(
+            session,
+            axis1_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis1_values_query
+    ]
+    axis2_values_display = [
+        session_axis_value_to_display(
+            session,
+            axis2_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis2_values_query
+    ]
+    resolved_slice_value_display = session_axis_value_to_display(
+        session,
+        drop_index,
+        resolved_slice_value_query,
+        display_normalized=display_normalized,
+    )
 
     selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[EvaluationResult] = []
@@ -2253,13 +2438,13 @@ async def compute_prediction_async(
         slice_matrix: List[List[float]] = []
         predict_count = 0
         _tp = time.perf_counter()
-        for axis2 in axis2_values:
+        for axis2 in axis2_values_query:
             row: List[float] = []
-            for axis1 in axis1_values:
+            for axis1 in axis1_values_query:
                 coords = [0.0, 0.0, 0.0]
                 coords[axis1_index] = axis1
                 coords[axis2_index] = axis2
-                coords[drop_index] = resolved_slice_value
+                coords[drop_index] = resolved_slice_value_query
                 row.append(method.interpolator.predict(tuple(coords)))
                 predict_count += 1
             slice_matrix.append(row)
@@ -2273,22 +2458,29 @@ async def compute_prediction_async(
                 rmse=method.rmse,
                 gradient_smoothness=method.gradient_smoothness,
                 laplacian_smoothness=method.laplacian_smoothness,
-                grid_points=method.grid_points,
+                grid_points=[
+                    session_point_to_display(
+                        session,
+                        point,
+                        display_normalized=display_normalized,
+                    )
+                    for point in method.grid_points
+                ],
                 grid_values=method.grid_values,
                 slice_axis=AXIS_LABELS[drop_index],
-                slice_value=resolved_slice_value,
+                slice_value=resolved_slice_value_display,
                 slice_axis1_label=AXIS_LABELS[axis1_index],
                 slice_axis2_label=AXIS_LABELS[axis2_index],
                 slice_fixed_label=AXIS_LABELS[drop_index],
-                slice_axis1_values=axis1_values,
-                slice_axis2_values=axis2_values,
+                slice_axis1_values=axis1_values_display,
+                slice_axis2_values=axis2_values_display,
                 slice_matrix=slice_matrix,
                 fit_time_ms=method.fit_time_ms,
                 predict_time_ms=predict_time_ms,
             )
         )
 
-    return results, normalized_axis, resolved_slice_value
+    return results, normalized_axis, resolved_slice_value_display
 
 
 def _sanitize_line_resolution(candidate: Optional[float]) -> int:
@@ -2308,6 +2500,7 @@ def compute_line_predictions(
     line_resolution: Optional[int] = None,
     progress_callback=None,
     algorithm_configs: Optional[List[Dict[str, Any]]] = None,
+    display_normalized: bool = True,
 ) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     axis_lookup = {"x": 0, "y": 1, "z": 2}
     normalized_axis = (varying_axis or "z").lower()
@@ -2316,7 +2509,16 @@ def compute_line_predictions(
     lower, upper = session.axis_bounds[varying_index]
     sanitized_resolution = _sanitize_line_resolution(line_resolution)
     effective_resolution = max(session.grid_size, sanitized_resolution)
-    axis_values, _ = create_grid(effective_resolution, lower, upper)
+    axis_values_query, _ = create_grid(effective_resolution, lower, upper)
+    axis_values_display = [
+        session_axis_value_to_display(
+            session,
+            varying_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis_values_query
+    ]
 
     normalized_fixed_input: Dict[str, float] = {}
     if isinstance(fixed_values, dict):
@@ -2331,6 +2533,13 @@ def compute_line_predictions(
         if axis_index == varying_index:
             continue
         candidate = normalized_fixed_input.get(label_lower)
+        if candidate is not None:
+            candidate = session_axis_value_to_query(
+                session,
+                axis_index,
+                candidate,
+                display_normalized=display_normalized,
+            )
         lower, upper = session.axis_bounds[axis_index]
         min_bound = min(lower, upper)
         max_bound = max(lower, upper)
@@ -2343,7 +2552,12 @@ def compute_line_predictions(
         else:
             candidate = max(min(candidate, max_bound), min_bound)
         coords_template[axis_index] = candidate
-        resolved_fixed[label_lower] = candidate
+        resolved_fixed[label_lower] = session_axis_value_to_display(
+            session,
+            axis_index,
+            candidate,
+            display_normalized=display_normalized,
+        )
 
     selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[LineSliceResult] = []
@@ -2353,11 +2567,11 @@ def compute_line_predictions(
             progress_callback(method_index, total_count, method.method)
         predicted_values: List[float] = []
         _tp = time.perf_counter()
-        for axis_value in axis_values:
+        for axis_value in axis_values_query:
             coords = coords_template[:]
             coords[varying_index] = axis_value
             predicted_values.append(method.interpolator.predict(tuple(coords)))
-        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values) if axis_values else 0.0
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values_query) if axis_values_query else 0.0
         method.predict_time_ms = predict_time_ms
 
         fixed_axes_info = [
@@ -2375,7 +2589,7 @@ def compute_line_predictions(
                 laplacian_smoothness=method.laplacian_smoothness,
                 varying_axis_label=AXIS_LABELS[varying_index],
                 varying_axis=AXIS_LABELS[varying_index],
-                axis_values=axis_values[:],
+                axis_values=axis_values_display[:],
                 predicted_values=predicted_values,
                 fixed_axes=fixed_axes_info,
                 fit_time_ms=method.fit_time_ms,
@@ -2393,6 +2607,7 @@ async def compute_line_predictions_async(
     line_resolution: Optional[int] = None,
     progress_callback=None,
     algorithm_configs: Optional[List[Dict[str, Any]]] = None,
+    display_normalized: bool = True,
 ) -> Tuple[List[LineSliceResult], str, Dict[str, float], int]:
     import asyncio
 
@@ -2403,7 +2618,16 @@ async def compute_line_predictions_async(
     lower, upper = session.axis_bounds[varying_index]
     sanitized_resolution = _sanitize_line_resolution(line_resolution)
     effective_resolution = max(session.grid_size, sanitized_resolution)
-    axis_values, _ = create_grid(effective_resolution, lower, upper)
+    axis_values_query, _ = create_grid(effective_resolution, lower, upper)
+    axis_values_display = [
+        session_axis_value_to_display(
+            session,
+            varying_index,
+            value,
+            display_normalized=display_normalized,
+        )
+        for value in axis_values_query
+    ]
 
     normalized_fixed_input: Dict[str, float] = {}
     if isinstance(fixed_values, dict):
@@ -2418,6 +2642,13 @@ async def compute_line_predictions_async(
         if axis_index == varying_index:
             continue
         candidate = normalized_fixed_input.get(label_lower)
+        if candidate is not None:
+            candidate = session_axis_value_to_query(
+                session,
+                axis_index,
+                candidate,
+                display_normalized=display_normalized,
+            )
         lower, upper = session.axis_bounds[axis_index]
         min_bound = min(lower, upper)
         max_bound = max(lower, upper)
@@ -2430,7 +2661,12 @@ async def compute_line_predictions_async(
         else:
             candidate = max(min(candidate, max_bound), min_bound)
         coords_template[axis_index] = candidate
-        resolved_fixed[label_lower] = candidate
+        resolved_fixed[label_lower] = session_axis_value_to_display(
+            session,
+            axis_index,
+            candidate,
+            display_normalized=display_normalized,
+        )
 
     selected_methods = resolve_prediction_methods(session, algorithm_configs)
     results: List[LineSliceResult] = []
@@ -2441,11 +2677,11 @@ async def compute_line_predictions_async(
         await asyncio.sleep(0.02)
         predicted_values: List[float] = []
         _tp = time.perf_counter()
-        for axis_value in axis_values:
+        for axis_value in axis_values_query:
             coords = coords_template[:]
             coords[varying_index] = axis_value
             predicted_values.append(method.interpolator.predict(tuple(coords)))
-        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values) if axis_values else 0.0
+        predict_time_ms = (time.perf_counter() - _tp) * 1000.0 / len(axis_values_query) if axis_values_query else 0.0
         method.predict_time_ms = predict_time_ms
 
         fixed_axes_info = [
@@ -2463,7 +2699,7 @@ async def compute_line_predictions_async(
                 laplacian_smoothness=method.laplacian_smoothness,
                 varying_axis_label=AXIS_LABELS[varying_index],
                 varying_axis=AXIS_LABELS[varying_index],
-                axis_values=axis_values[:],
+                axis_values=axis_values_display[:],
                 predicted_values=predicted_values,
                 fixed_axes=fixed_axes_info,
                 fit_time_ms=method.fit_time_ms,
@@ -2574,6 +2810,7 @@ def compute_metrics_session(
 def predict_session(
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
+    denormalize_after_predict: bool = False,
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
@@ -2583,15 +2820,25 @@ def predict_session(
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    display_normalized = not denormalize_after_predict
     selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     results, normalized_axis, resolved_value = compute_prediction(
-        active_session, slice_axis, slice_value, progress_callback=progress_callback, algorithm_configs=algorithm_configs
+        active_session,
+        slice_axis,
+        slice_value,
+        progress_callback=progress_callback,
+        algorithm_configs=algorithm_configs,
+        display_normalized=display_normalized,
     )
 
     dataset_payload = build_dataset_payload(
         active_session.dataset,
         active_session.dataset_source,
         active_session.axis_bounds,
+        normalize=active_session.normalize,
+        norm_means=active_session.norm_means,
+        norm_stds=active_session.norm_stds,
+        display_normalized=display_normalized,
     )
     svg_content = render_bar_chart_svg_string(results) if results else ""
 
@@ -2610,6 +2857,7 @@ def predict_line_session(
     varying_axis: str = "z",
     fixed_values: Optional[Dict[str, float]] = None,
     line_resolution: Optional[int] = None,
+    denormalize_after_predict: bool = False,
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
@@ -2619,6 +2867,7 @@ def predict_line_session(
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    display_normalized = not denormalize_after_predict
     selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     (
         line_results,
@@ -2632,12 +2881,17 @@ def predict_line_session(
         line_resolution=line_resolution,
         progress_callback=progress_callback,
         algorithm_configs=algorithm_configs,
+        display_normalized=display_normalized,
     )
 
     dataset_payload = build_dataset_payload(
         active_session.dataset,
         active_session.dataset_source,
         active_session.axis_bounds,
+        normalize=active_session.normalize,
+        norm_means=active_session.norm_means,
+        norm_stds=active_session.norm_stds,
+        display_normalized=display_normalized,
     )
 
     return {
@@ -2655,6 +2909,7 @@ def predict_line_session(
 async def predict_session_async(
     slice_axis: str = "z",
     slice_value: Optional[float] = None,
+    denormalize_after_predict: bool = False,
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
@@ -2666,15 +2921,25 @@ async def predict_session_async(
     
     print("python:algorithm_configs", algorithm_configs)
 
+    display_normalized = not denormalize_after_predict
     selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     results, normalized_axis, resolved_value = await compute_prediction_async(
-        active_session, slice_axis, slice_value, progress_callback=progress_callback, algorithm_configs=algorithm_configs
+        active_session,
+        slice_axis,
+        slice_value,
+        progress_callback=progress_callback,
+        algorithm_configs=algorithm_configs,
+        display_normalized=display_normalized,
     )
 
     dataset_payload = build_dataset_payload(
         active_session.dataset,
         active_session.dataset_source,
         active_session.axis_bounds,
+        normalize=active_session.normalize,
+        norm_means=active_session.norm_means,
+        norm_stds=active_session.norm_stds,
+        display_normalized=display_normalized,
     )
     svg_content = render_bar_chart_svg_string(results) if results else ""
 
@@ -2693,6 +2958,7 @@ async def predict_line_session_async(
     varying_axis: str = "z",
     fixed_values: Optional[Dict[str, float]] = None,
     line_resolution: Optional[int] = None,
+    denormalize_after_predict: bool = False,
     *,
     session: Optional[ComparisonSession] = None,
     progress_callback=None,
@@ -2702,6 +2968,7 @@ async def predict_line_session_async(
     if active_session is None:
         raise RuntimeError("No active session available. Call fit_session() first.")
 
+    display_normalized = not denormalize_after_predict
     selected_methods = resolve_prediction_methods(active_session, algorithm_configs)
     (
         line_results,
@@ -2715,12 +2982,17 @@ async def predict_line_session_async(
         line_resolution=line_resolution,
         progress_callback=progress_callback,
         algorithm_configs=algorithm_configs,
+        display_normalized=display_normalized,
     )
 
     dataset_payload = build_dataset_payload(
         active_session.dataset,
         active_session.dataset_source,
         active_session.axis_bounds,
+        normalize=active_session.normalize,
+        norm_means=active_session.norm_means,
+        norm_stds=active_session.norm_stds,
+        display_normalized=display_normalized,
     )
 
     return {
@@ -2866,7 +3138,12 @@ def run_comparison(
     svg_content = render_bar_chart_svg_string(results) if results else ""
     results_payload = serialize_results(results)
     dataset_payload = build_dataset_payload(
-        session.dataset, session.dataset_source, session.axis_bounds
+        session.dataset,
+        session.dataset_source,
+        session.axis_bounds,
+        normalize=session.normalize,
+        norm_means=session.norm_means,
+        norm_stds=session.norm_stds,
     )
 
     results_csv_actual = results_path if save_artifacts and results else None

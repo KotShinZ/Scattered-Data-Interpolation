@@ -183,6 +183,145 @@ class LinePredictionSessionTests(unittest.TestCase):
         self.assertEqual(len(interpolators), 1)
         self.assertEqual(interpolators[0].name, "Inverse Distance Weighting")
 
+    def test_normalized_line_predictions_return_normalized_display_coordinates(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        result = predict_line_session(
+            session=session,
+            varying_axis="x",
+            fixed_values={"y": 0.0, "z": 0.0},
+        )
+
+        expected_x_min = (self.bounds["x"][0] - session.norm_means[0]) / session.norm_stds[0]
+        expected_x_max = (self.bounds["x"][1] - session.norm_means[0]) / session.norm_stds[0]
+        expected_first_point = [
+            (self.dataset[0][0][axis] - session.norm_means[axis]) / session.norm_stds[axis]
+            for axis in range(3)
+        ]
+
+        self.assertEqual(len(result["line_results"]), 1)
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][0], expected_x_min)
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][-1], expected_x_max)
+        self.assertAlmostEqual(result["fixed_axes"]["y"], 0.0)
+        self.assertAlmostEqual(result["fixed_axes"]["z"], 0.0)
+        self.assertAlmostEqual(result["dataset"]["axis_bounds"][0][0], expected_x_min)
+        self.assertAlmostEqual(result["dataset"]["axis_bounds"][0][1], expected_x_max)
+        for axis in range(3):
+            self.assertAlmostEqual(result["dataset"]["points"][0][axis], expected_first_point[axis])
+
+    def test_denormalized_line_predictions_return_original_display_coordinates(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        expected_original_y = self.bounds["y"][0] + (self.bounds["y"][1] - self.bounds["y"][0]) / 2.0
+        expected_original_z = self.bounds["z"][0] + (self.bounds["z"][1] - self.bounds["z"][0]) / 2.0
+
+        result = predict_line_session(
+            session=session,
+            varying_axis="x",
+            fixed_values={"y": expected_original_y, "z": expected_original_z},
+            denormalize_after_predict=True,
+        )
+
+        self.assertEqual(len(result["line_results"]), 1)
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][0], self.bounds["x"][0])
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][-1], self.bounds["x"][1])
+        self.assertAlmostEqual(result["fixed_axes"]["y"], expected_original_y)
+        self.assertAlmostEqual(result["fixed_axes"]["z"], expected_original_z)
+        self.assertAlmostEqual(result["dataset"]["axis_bounds"][0][0], self.bounds["x"][0])
+        self.assertAlmostEqual(result["dataset"]["axis_bounds"][0][1], self.bounds["x"][1])
+        self.assertAlmostEqual(result["dataset"]["points"][0][0], self.dataset[0][0][0])
+
+    def test_normalized_plane_predictions_use_normalized_slice_coordinates(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        result = predict_session(
+            session=session,
+            slice_axis="z",
+            slice_value=0.0,
+        )
+
+        slice_payload = result["results"][0]["slice"]
+        expected_x_min = (self.bounds["x"][0] - session.norm_means[0]) / session.norm_stds[0]
+        expected_x_max = (self.bounds["x"][1] - session.norm_means[0]) / session.norm_stds[0]
+        expected_y_min = (self.bounds["y"][0] - session.norm_means[1]) / session.norm_stds[1]
+        expected_y_max = (self.bounds["y"][1] - session.norm_means[1]) / session.norm_stds[1]
+
+        self.assertEqual(len(result["results"]), 1)
+        self.assertAlmostEqual(result["slice_value"], 0.0)
+        self.assertAlmostEqual(slice_payload["value"], 0.0)
+        self.assertAlmostEqual(slice_payload["axis1_values"][0], expected_x_min)
+        self.assertAlmostEqual(slice_payload["axis1_values"][-1], expected_x_max)
+        self.assertAlmostEqual(slice_payload["axis2_values"][0], expected_y_min)
+        self.assertAlmostEqual(slice_payload["axis2_values"][-1], expected_y_max)
+
+    def test_denormalized_plane_predictions_use_original_slice_coordinates(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        original_slice_value = self.bounds["z"][0] + (self.bounds["z"][1] - self.bounds["z"][0]) / 2.0
+        result = predict_session(
+            session=session,
+            slice_axis="z",
+            slice_value=original_slice_value,
+            denormalize_after_predict=True,
+        )
+
+        slice_payload = result["results"][0]["slice"]
+        self.assertEqual(len(result["results"]), 1)
+        self.assertAlmostEqual(result["slice_value"], original_slice_value)
+        self.assertAlmostEqual(slice_payload["value"], original_slice_value)
+        self.assertAlmostEqual(slice_payload["axis1_values"][0], self.bounds["x"][0])
+        self.assertAlmostEqual(slice_payload["axis1_values"][-1], self.bounds["x"][1])
+        self.assertAlmostEqual(slice_payload["axis2_values"][0], self.bounds["y"][0])
+        self.assertAlmostEqual(slice_payload["axis2_values"][-1], self.bounds["y"][1])
+
     def test_exported_and_imported_session_preserves_selected_algorithm_ids(self) -> None:
         session = fit_session(
             dataset=self.dataset,
@@ -206,6 +345,35 @@ class LinePredictionSessionTests(unittest.TestCase):
         self.assertEqual(restored.methods[0].algorithm_id, "IDW")
         self.assertEqual(len(result["results"]), 1)
         self.assertEqual(result["results"][0]["method"], "Inverse Distance Weighting")
+
+    def test_imported_normalized_session_uses_normalized_display_coordinates(self) -> None:
+        session = fit_session(
+            dataset=self.dataset,
+            grid_size=4,
+            test_ratio=0.25,
+            normalize=True,
+            algorithm_configs=[
+                {
+                    "id": "IDW",
+                    "enabled": True,
+                    "params": {"power": 2.0},
+                }
+            ],
+        )
+
+        restored = import_session(export_session(session))
+        result = predict_line_session(
+            session=restored,
+            varying_axis="x",
+            fixed_values={"y": 0.0, "z": 0.0},
+        )
+        expected_x_min = (self.bounds["x"][0] - session.norm_means[0]) / session.norm_stds[0]
+        expected_x_max = (self.bounds["x"][1] - session.norm_means[0]) / session.norm_stds[0]
+
+        self.assertAlmostEqual(result["fixed_axes"]["y"], 0.0)
+        self.assertAlmostEqual(result["fixed_axes"]["z"], 0.0)
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][0], expected_x_min)
+        self.assertAlmostEqual(result["line_results"][0]["axis_values"][-1], expected_x_max)
 
 
 if __name__ == "__main__":  # pragma: no cover

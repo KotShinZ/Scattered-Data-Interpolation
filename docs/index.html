@@ -757,6 +757,10 @@
             <input type="checkbox" id="normalize-toggle" />
             <label for="normalize-toggle">正規化（x,y,z を平均・標準偏差で正規化して補間）</label>
           </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="denormalize-after-predict-toggle" />
+            <label for="denormalize-after-predict-toggle">推論後に逆正規化を行う</label>
+          </div>
           <div class="hint-box">
             CSV には <code>x,y,z,value</code> の 4 列を含めてください。データを読み込み学習が完了すると、「結果を計算」で predict のみが実行されます。
           </div>
@@ -954,6 +958,8 @@
       const sliceAxisSelect = document.getElementById("slice-axis");
       const sliceValueInput = document.getElementById("slice-value");
       const sliceValueLabel = document.getElementById("slice-value-label");
+      const normalizeToggle = document.getElementById("normalize-toggle");
+      const denormalizeAfterPredictToggle = document.getElementById("denormalize-after-predict-toggle");
       const surfaceOcclusionToggle = document.getElementById("surface-occlusion");
       const pointSizeInput = document.getElementById("point-size");
       const fileInput = document.getElementById("csv-input");
@@ -1041,6 +1047,240 @@
         }
         const axis = (sliceAxisSelect.value || "z").toUpperCase();
         sliceValueLabel.textContent = `固定値 (${axis}):`;
+      }
+
+      function setSliceDefaultFromBounds(bounds, options = {}) {
+        if (!sliceValueInput || !sliceAxisSelect || !Array.isArray(bounds)) {
+          return;
+        }
+        const force = Boolean(options.force);
+        const axis = (sliceAxisSelect.value || "z").toLowerCase();
+        const axisIndex = axisKeys.indexOf(axis);
+        if (axisIndex < 0) {
+          return;
+        }
+        const axisBounds = bounds[axisIndex];
+        if (!Array.isArray(axisBounds) || axisBounds.length < 2) {
+          return;
+        }
+        const minValue = Number(axisBounds[0]);
+        const maxValue = Number(axisBounds[1]);
+        if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+          return;
+        }
+        const midpoint = (minValue + maxValue) / 2;
+        const current = Number.parseFloat(sliceValueInput.value);
+        if (force || !Number.isFinite(current)) {
+          sliceValueInput.value = String(midpoint);
+        }
+      }
+
+      function shouldDenormalizeAfterPredict() {
+        return Boolean(denormalizeAfterPredictToggle && denormalizeAfterPredictToggle.checked);
+      }
+
+      function hasDatasetNormalizationMetadata(dataset) {
+        return Boolean(
+          dataset &&
+            dataset.normalize === true &&
+            Array.isArray(dataset.norm_means) &&
+            dataset.norm_means.length === axisKeys.length &&
+            Array.isArray(dataset.norm_stds) &&
+            dataset.norm_stds.length === axisKeys.length
+        );
+      }
+
+      function datasetDisplayNormalized(dataset) {
+        return Boolean(!dataset || dataset.display_normalized !== false);
+      }
+
+      function convertAxisValueBetweenDisplaySpaces(
+        value,
+        axisIndex,
+        dataset,
+        targetDisplayNormalized
+      ) {
+        const numericValue = Number(value);
+        if (
+          !Number.isFinite(numericValue) ||
+          !hasDatasetNormalizationMetadata(dataset) ||
+          axisIndex < 0 ||
+          axisIndex >= axisKeys.length
+        ) {
+          return numericValue;
+        }
+        const currentDisplayNormalized = datasetDisplayNormalized(dataset);
+        if (currentDisplayNormalized === targetDisplayNormalized) {
+          return numericValue;
+        }
+        const mean = Number(dataset.norm_means[axisIndex]);
+        const std = Number(dataset.norm_stds[axisIndex]);
+        if (!Number.isFinite(mean) || !Number.isFinite(std) || std === 0) {
+          return numericValue;
+        }
+        if (targetDisplayNormalized) {
+          return (numericValue - mean) / std;
+        }
+        return numericValue * std + mean;
+      }
+
+      function convertDatasetDisplaySpace(dataset, targetDisplayNormalized) {
+        if (!dataset || typeof dataset !== "object" || !hasDatasetNormalizationMetadata(dataset)) {
+          return dataset;
+        }
+        return {
+          ...dataset,
+          points: Array.isArray(dataset.points)
+            ? dataset.points.map((point) =>
+                Array.isArray(point)
+                  ? point.map((value, axisIndex) =>
+                      convertAxisValueBetweenDisplaySpaces(
+                        value,
+                        axisIndex,
+                        dataset,
+                        targetDisplayNormalized
+                      )
+                    )
+                  : point
+              )
+            : dataset.points,
+          axis_bounds: Array.isArray(dataset.axis_bounds)
+            ? dataset.axis_bounds.map((bounds, axisIndex) =>
+                Array.isArray(bounds)
+                  ? bounds.map((value) =>
+                      convertAxisValueBetweenDisplaySpaces(
+                        value,
+                        axisIndex,
+                        dataset,
+                        targetDisplayNormalized
+                      )
+                    )
+                  : bounds
+              )
+            : dataset.axis_bounds,
+          display_normalized: targetDisplayNormalized,
+        };
+      }
+
+      function convertRangeDisplaySpace(range, dataset, targetDisplayNormalized) {
+        if (!range || !hasDatasetNormalizationMetadata(dataset)) {
+          return cloneRange(range);
+        }
+        const converted = {};
+        axisKeys.forEach((axis, axisIndex) => {
+          const axisRange = range[axis];
+          if (!axisRange) {
+            return;
+          }
+          converted[axis] = {
+            min: convertAxisValueBetweenDisplaySpaces(
+              axisRange.min,
+              axisIndex,
+              dataset,
+              targetDisplayNormalized
+            ),
+            max: convertAxisValueBetweenDisplaySpaces(
+              axisRange.max,
+              axisIndex,
+              dataset,
+              targetDisplayNormalized
+            ),
+          };
+        });
+        return converted;
+      }
+
+      function convertPlaneResultsDisplaySpace(results, dataset, targetDisplayNormalized) {
+        if (!Array.isArray(results) || !hasDatasetNormalizationMetadata(dataset)) {
+          return Array.isArray(results) ? results.slice() : results;
+        }
+        return results.map((item) => {
+          const slice = item?.slice || {};
+          const fixedAxisIndex = axisKeys.indexOf(String(slice.axis || "").toLowerCase());
+          const axis1Index = axisIndexLookup[String(slice.axis1_label || "").toUpperCase()] ?? -1;
+          const axis2Index = axisIndexLookup[String(slice.axis2_label || "").toUpperCase()] ?? -1;
+          return {
+            ...item,
+            slice: {
+              ...slice,
+              value: convertAxisValueBetweenDisplaySpaces(
+                slice.value,
+                fixedAxisIndex,
+                dataset,
+                targetDisplayNormalized
+              ),
+              axis1_values: Array.isArray(slice.axis1_values)
+                ? slice.axis1_values.map((value) =>
+                    convertAxisValueBetweenDisplaySpaces(
+                      value,
+                      axis1Index,
+                      dataset,
+                      targetDisplayNormalized
+                    )
+                  )
+                : slice.axis1_values,
+              axis2_values: Array.isArray(slice.axis2_values)
+                ? slice.axis2_values.map((value) =>
+                    convertAxisValueBetweenDisplaySpaces(
+                      value,
+                      axis2Index,
+                      dataset,
+                      targetDisplayNormalized
+                    )
+                  )
+                : slice.axis2_values,
+            },
+          };
+        });
+      }
+
+      function syncDisplaySpaceFromToggle() {
+        if (!hasDatasetNormalizationMetadata(latestDataset)) {
+          return;
+        }
+        const targetDisplayNormalized = !shouldDenormalizeAfterPredict();
+        if (datasetDisplayNormalized(latestDataset) === targetDisplayNormalized) {
+          return;
+        }
+        const sourceDataset = latestDataset;
+        const selectedAxis = (sliceAxisSelect ? sliceAxisSelect.value || "z" : "z").toLowerCase();
+        const axisIndex = axisKeys.indexOf(selectedAxis);
+        const currentSliceValue = sliceValueInput
+          ? Number.parseFloat(sliceValueInput.value)
+          : Number.NaN;
+
+        if (sliceValueInput && Number.isFinite(currentSliceValue)) {
+          sliceValueInput.value = String(
+            convertAxisValueBetweenDisplaySpaces(
+              currentSliceValue,
+              axisIndex,
+              sourceDataset,
+              targetDisplayNormalized
+            )
+          );
+        }
+
+        defaultPointRange = convertRangeDisplaySpace(
+          defaultPointRange,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        currentPointRange = convertRangeDisplaySpace(
+          currentPointRange,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        latestResults = convertPlaneResultsDisplaySpace(
+          latestResults,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        latestDataset = convertDatasetDisplaySpace(sourceDataset, targetDisplayNormalized);
+        applyPointRangeInputs(getActivePointRange());
+
+        if (latestDataset && latestResults.length) {
+          render3DPlots(latestResults, latestDataset);
+        }
       }
 
       function setAxisControlsDisabled(disabled) {
@@ -1186,6 +1426,7 @@
       updateDatasetLabel();
       updateSliceValueLabel();
       clearVisualizations();
+      syncPointRangeWithCurrentSlice({ rerender: false });
 
       const worker = new Worker("pyodide-worker.js");
       let workerRequestId = 0;
@@ -1266,6 +1507,7 @@
             importedDatasetName = file.name;
             datasetSource = "custom";
             setPointRangeFromDataset(importedDataset, { force: true });
+            syncPointRangeWithCurrentSlice({ rerender: false });
             if (datasetStore && typeof datasetStore.save === "function") {
               datasetStore.save({
                 name: importedDatasetName,
@@ -1299,6 +1541,7 @@
           importedDatasetName = storedSelection.name || "インポートデータ";
           datasetSource = "custom";
           setPointRangeFromDataset(importedDataset, { force: true });
+          syncPointRangeWithCurrentSlice({ rerender: false });
           updateDatasetLabel();
           statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
           await trainCurrentDataset();
@@ -1311,6 +1554,7 @@
           importedDatasetName = "";
           datasetSource = "dummy";
           setPointRangeFromDataset({ axis_bounds: DEFAULT_DUMMY_BOUNDS }, { force: true });
+          syncPointRangeWithCurrentSlice({ rerender: false });
           if (fileInput) {
             fileInput.value = "";
           }
@@ -1449,6 +1693,40 @@
           pointRangeDirty = false;
           applyPointRangeInputs(currentPointRange);
           rerenderPlotsForRangeChange();
+        }
+      }
+
+      function syncPointRangeWithCurrentSlice(options = {}) {
+        const axis =
+          (typeof options.axis === "string" && options.axis) ||
+          (sliceAxisSelect ? sliceAxisSelect.value || "z" : "z");
+        const normalizedAxis = axis.toLowerCase();
+        if (!axisKeys.includes(normalizedAxis)) {
+          return;
+        }
+
+        const candidateValue = Number(
+          options.value ?? (sliceValueInput ? sliceValueInput.value : Number.NaN)
+        );
+        if (!Number.isFinite(candidateValue)) {
+          return;
+        }
+
+        const baseRange =
+          cloneRange(options.baseRange) ||
+          readPointRangeInputs() ||
+          cloneRange(getActivePointRange()) ||
+          {};
+        baseRange[normalizedAxis] = {
+          min: candidateValue,
+          max: candidateValue,
+        };
+        currentPointRange = cloneRange(baseRange) || baseRange;
+        pointRangeDirty = false;
+        applyPointRangeInputs(currentPointRange);
+
+        if (options.rerender !== false) {
+          schedulePlotRerender(true);
         }
       }
 
@@ -2141,11 +2419,31 @@
           const result = await callWorker("predictPlane", {
             sliceAxis: chosenAxis,
             sliceValue,
+            denormalizeAfterPredict: shouldDenormalizeAfterPredict(),
             algorithmConfigs: currentAlgoConfigs,
           });
+          const preservedPointRange =
+            readPointRangeInputs() || cloneRange(getActivePointRange());
           latestResults = Array.isArray(result.results) ? result.results : [];
           latestDataset = result.dataset || null;
           setPointRangeFromDataset(latestDataset, { force: false });
+          const axisFromResult = result.slice_axis || chosenAxis;
+          const valueFromResult = Number(result.slice_value);
+          const resolvedSliceValue = Number.isFinite(valueFromResult)
+            ? valueFromResult
+            : sliceValue;
+          if (sliceAxisSelect) {
+            sliceAxisSelect.value = axisFromResult;
+          }
+          if (sliceValueInput && Number.isFinite(resolvedSliceValue)) {
+            sliceValueInput.value = String(resolvedSliceValue);
+          }
+          syncPointRangeWithCurrentSlice({
+            axis: axisFromResult,
+            value: resolvedSliceValue,
+            baseRange: preservedPointRange,
+            rerender: false,
+          });
           latestOcclusionPreference = surfaceOcclusionToggle
             ? Boolean(surfaceOcclusionToggle.checked)
             : false;
@@ -2156,16 +2454,6 @@
           } else {
             purgePlotlyChartsIn(plotsContainer);
             plotsContainer.textContent = "3Dグラフを生成できませんでした。";
-          }
-          if (sliceAxisSelect) {
-            const axisFromResult = result.slice_axis || chosenAxis;
-            sliceAxisSelect.value = axisFromResult;
-          }
-          if (sliceValueInput) {
-            const valueFromResult = Number(result.slice_value);
-            if (Number.isFinite(valueFromResult)) {
-              sliceValueInput.value = String(valueFromResult);
-            }
           }
           updateSliceValueLabel();
           if (result.skipped && result.skipped.length) {
@@ -2220,13 +2508,30 @@
           statusEl.textContent = `${label} を用いて学習中...`;
           try {
             await pyodideReadyPromise;
-            const normalizeToggle = document.getElementById("normalize-toggle");
             const normalizeFlag = normalizeToggle ? normalizeToggle.checked : false;
-            await callWorker("fit", {
+            const fitResult = await callWorker("fit", {
               dataset: datasetSource === "custom" ? importedDataset : null,
               normalize: normalizeFlag,
+              denormalizeAfterPredict: shouldDenormalizeAfterPredict(),
               algorithmConfigs: currentAlgoConfigs,
             });
+            if (fitResult && fitResult.dataset) {
+              latestDataset = fitResult.dataset;
+              setPointRangeFromDataset(latestDataset, { force: true });
+              if (Array.isArray(latestDataset.axis_bounds)) {
+                setSliceDefaultFromBounds(latestDataset.axis_bounds, { force: true });
+              }
+              const currentSliceValue = sliceValueInput
+                ? Number.parseFloat(sliceValueInput.value)
+                : Number.NaN;
+              if (Number.isFinite(currentSliceValue)) {
+                syncPointRangeWithCurrentSlice({
+                  axis: sliceAxisSelect ? sliceAxisSelect.value || "z" : "z",
+                  value: currentSliceValue,
+                  rerender: false,
+                });
+              }
+            }
             sessionReady = true;
             const normalizeNote = normalizeFlag ? "（正規化あり）" : "";
             statusEl.textContent = `${label} の学習が完了しました${normalizeNote}。滑らかさ計算ボタンでRMSE・滑らかさを計算できます。`;
@@ -2528,6 +2833,11 @@
 
 
       buttonEl.addEventListener("click", runPredictionOnly);
+      if (denormalizeAfterPredictToggle) {
+        denormalizeAfterPredictToggle.addEventListener("change", () => {
+          syncDisplaySpaceFromToggle();
+        });
+      }
       if (sliceAxisSelect) {
         sliceAxisSelect.addEventListener("change", updateSliceValueLabel);
       }

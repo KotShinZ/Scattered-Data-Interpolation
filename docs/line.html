@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -618,6 +618,10 @@
             <input type="checkbox" id="normalize-toggle" />
             <label for="normalize-toggle">正規化（x,y,z を平均・標準偏差で正規化して補間）</label>
           </div>
+          <div class="toggle-row">
+            <input type="checkbox" id="denormalize-after-predict-toggle" />
+            <label for="denormalize-after-predict-toggle">推論後に逆正規化を行う</label>
+          </div>
           <div class="hint-box">
             CSV には <code>x,y,z,value</code> の 4 列を含めてください。読み込み完了後に学習し、ボタン押下で predict のみを実行します。
           </div>
@@ -844,6 +848,8 @@
       const skippedContainer = document.getElementById("skipped");
       const lineAxisSelect = document.getElementById("line-axis");
       const lineResolutionInput = document.getElementById("line-resolution");
+      const normalizeToggle = document.getElementById("normalize-toggle");
+      const denormalizeAfterPredictToggle = document.getElementById("denormalize-after-predict-toggle");
       const fixedInputs = {
         x: document.getElementById("fixed-x"),
         y: document.getElementById("fixed-y"),
@@ -931,6 +937,7 @@
 
       setAxisControlsDisabled(true);
       syncRangeInputsFromState();
+      syncPointRangeWithCurrentFixedAxes({ rerender: false });
       if (lineResolutionInput) {
         lineResolutionInput.value = String(DEFAULT_LINE_RESOLUTION);
         const ensureBounds = () => {
@@ -973,6 +980,215 @@
           return "ダミーデータ";
         }
         return "データ未読み込み";
+      }
+
+      function shouldDenormalizeAfterPredict() {
+        return Boolean(denormalizeAfterPredictToggle && denormalizeAfterPredictToggle.checked);
+      }
+
+      function hasDatasetNormalizationMetadata(dataset) {
+        return Boolean(
+          dataset &&
+            dataset.normalize === true &&
+            Array.isArray(dataset.norm_means) &&
+            dataset.norm_means.length === axisKeys.length &&
+            Array.isArray(dataset.norm_stds) &&
+            dataset.norm_stds.length === axisKeys.length
+        );
+      }
+
+      function datasetDisplayNormalized(dataset) {
+        return Boolean(!dataset || dataset.display_normalized !== false);
+      }
+
+      function convertAxisValueBetweenDisplaySpaces(
+        value,
+        axisIndex,
+        dataset,
+        targetDisplayNormalized
+      ) {
+        const numericValue = Number(value);
+        if (
+          !Number.isFinite(numericValue) ||
+          !hasDatasetNormalizationMetadata(dataset) ||
+          axisIndex < 0 ||
+          axisIndex >= axisKeys.length
+        ) {
+          return numericValue;
+        }
+        const currentDisplayNormalized = datasetDisplayNormalized(dataset);
+        if (currentDisplayNormalized === targetDisplayNormalized) {
+          return numericValue;
+        }
+        const mean = Number(dataset.norm_means[axisIndex]);
+        const std = Number(dataset.norm_stds[axisIndex]);
+        if (!Number.isFinite(mean) || !Number.isFinite(std) || std === 0) {
+          return numericValue;
+        }
+        if (targetDisplayNormalized) {
+          return (numericValue - mean) / std;
+        }
+        return numericValue * std + mean;
+      }
+
+      function convertDatasetDisplaySpace(dataset, targetDisplayNormalized) {
+        if (!dataset || typeof dataset !== "object" || !hasDatasetNormalizationMetadata(dataset)) {
+          return dataset;
+        }
+        return {
+          ...dataset,
+          points: Array.isArray(dataset.points)
+            ? dataset.points.map((point) =>
+                Array.isArray(point)
+                  ? point.map((value, axisIndex) =>
+                      convertAxisValueBetweenDisplaySpaces(
+                        value,
+                        axisIndex,
+                        dataset,
+                        targetDisplayNormalized
+                      )
+                    )
+                  : point
+              )
+            : dataset.points,
+          axis_bounds: Array.isArray(dataset.axis_bounds)
+            ? dataset.axis_bounds.map((bounds, axisIndex) =>
+                Array.isArray(bounds)
+                  ? bounds.map((value) =>
+                      convertAxisValueBetweenDisplaySpaces(
+                        value,
+                        axisIndex,
+                        dataset,
+                        targetDisplayNormalized
+                      )
+                    )
+                  : bounds
+              )
+            : dataset.axis_bounds,
+          display_normalized: targetDisplayNormalized,
+        };
+      }
+
+      function convertRangeDisplaySpace(range, dataset, targetDisplayNormalized) {
+        if (!range || !hasDatasetNormalizationMetadata(dataset)) {
+          return cloneRange(range);
+        }
+        const converted = {};
+        axisKeys.forEach((axis, axisIndex) => {
+          const axisRange = range[axis];
+          if (!axisRange) {
+            return;
+          }
+          converted[axis] = {
+            min: convertAxisValueBetweenDisplaySpaces(
+              axisRange.min,
+              axisIndex,
+              dataset,
+              targetDisplayNormalized
+            ),
+            max: convertAxisValueBetweenDisplaySpaces(
+              axisRange.max,
+              axisIndex,
+              dataset,
+              targetDisplayNormalized
+            ),
+          };
+        });
+        return converted;
+      }
+
+      function convertLineResultsDisplaySpace(results, dataset, targetDisplayNormalized) {
+        if (!Array.isArray(results) || !hasDatasetNormalizationMetadata(dataset)) {
+          return Array.isArray(results) ? results.slice() : results;
+        }
+        return results.map((item) => {
+          const varyingAxis = typeof item?.varying_axis === "string" ? item.varying_axis.toLowerCase() : "z";
+          const varyingAxisIndex = axisKeys.indexOf(varyingAxis);
+          return {
+            ...item,
+            axis_values: Array.isArray(item?.axis_values)
+              ? item.axis_values.map((value) =>
+                  convertAxisValueBetweenDisplaySpaces(
+                    value,
+                    varyingAxisIndex,
+                    dataset,
+                    targetDisplayNormalized
+                  )
+                )
+              : item?.axis_values,
+            fixed_axes: Array.isArray(item?.fixed_axes)
+              ? item.fixed_axes.map((pair) => {
+                  if (!Array.isArray(pair) || pair.length < 2) {
+                    return pair;
+                  }
+                  const axisIndex = axisKeys.indexOf(String(pair[0] || "").toLowerCase());
+                  return [
+                    pair[0],
+                    convertAxisValueBetweenDisplaySpaces(
+                      pair[1],
+                      axisIndex,
+                      dataset,
+                      targetDisplayNormalized
+                    ),
+                  ];
+                })
+              : item?.fixed_axes,
+          };
+        });
+      }
+
+      function syncDisplaySpaceFromToggle() {
+        if (!hasDatasetNormalizationMetadata(latestDataset)) {
+          return;
+        }
+        const targetDisplayNormalized = !shouldDenormalizeAfterPredict();
+        if (datasetDisplayNormalized(latestDataset) === targetDisplayNormalized) {
+          return;
+        }
+        const sourceDataset = latestDataset;
+
+        Object.entries(fixedInputs).forEach(([axis, input]) => {
+          if (!input) {
+            return;
+          }
+          const numericValue = Number.parseFloat(input.value);
+          if (!Number.isFinite(numericValue)) {
+            return;
+          }
+          const axisIndex = axisKeys.indexOf(axis);
+          input.value = String(
+            convertAxisValueBetweenDisplaySpaces(
+              numericValue,
+              axisIndex,
+              sourceDataset,
+              targetDisplayNormalized
+            )
+          );
+        });
+
+        defaultPointRange = convertRangeDisplaySpace(
+          defaultPointRange,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        currentPointRange = convertRangeDisplaySpace(
+          currentPointRange,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        latestLineResults = convertLineResultsDisplaySpace(
+          latestLineResults,
+          sourceDataset,
+          targetDisplayNormalized
+        );
+        latestDataset = convertDatasetDisplaySpace(sourceDataset, targetDisplayNormalized);
+        manualAxisRanges.x = { min: null, max: null };
+        syncRangeInputsFromState();
+        applyPointRangeInputs(getActivePointRange());
+
+        if (latestLineResults.length) {
+          renderLinePlots(latestLineResults);
+        }
       }
 
       function updateDatasetLabel() {
@@ -1182,6 +1398,56 @@
           currentPointRange = cloneRange(candidate);
           pointRangeDirty = false;
           applyPointRangeInputs(currentPointRange);
+          rerenderPlotsForPointRange();
+        }
+      }
+
+      function syncPointRangeWithCurrentFixedAxes(options = {}) {
+        const varyingAxis =
+          (typeof options.varyingAxis === "string" && options.varyingAxis) ||
+          (lineAxisSelect ? lineAxisSelect.value || "z" : "z");
+        const normalizedVaryingAxis = varyingAxis.toLowerCase();
+        if (!axisKeys.includes(normalizedVaryingAxis)) {
+          return;
+        }
+
+        const providedFixedValues =
+          options.fixedValues && typeof options.fixedValues === "object"
+            ? options.fixedValues
+            : null;
+        const baseRange =
+          cloneRange(options.baseRange) ||
+          readPointRangeInputs() ||
+          cloneRange(getActivePointRange()) ||
+          {};
+        let updated = false;
+
+        axisKeys.forEach((axis) => {
+          if (axis === normalizedVaryingAxis) {
+            return;
+          }
+          const candidateValue = Number(
+            providedFixedValues?.[axis] ?? fixedInputs[axis]?.value ?? Number.NaN
+          );
+          if (!Number.isFinite(candidateValue)) {
+            return;
+          }
+          baseRange[axis] = {
+            min: candidateValue,
+            max: candidateValue,
+          };
+          updated = true;
+        });
+
+        if (!updated) {
+          return;
+        }
+
+        currentPointRange = cloneRange(baseRange) || baseRange;
+        pointRangeDirty = false;
+        applyPointRangeInputs(currentPointRange);
+
+        if (options.rerender !== false) {
           rerenderPlotsForPointRange();
         }
       }
@@ -1430,10 +1696,11 @@
         );
       }
 
-      function setFixedDefaultsFromBounds(bounds) {
+      function setFixedDefaultsFromBounds(bounds, options = {}) {
         if (!Array.isArray(bounds)) {
           return;
         }
+        const force = Boolean(options.force);
         ["x", "y", "z"].forEach((axis, index) => {
           const input = fixedInputs[axis];
           if (!input) {
@@ -1450,7 +1717,7 @@
           }
           const midpoint = (minValue + maxValue) / 2;
           const current = Number.parseFloat(input.value);
-          if (!Number.isFinite(current)) {
+          if (force || !Number.isFinite(current)) {
             input.value = String(midpoint);
           }
         });
@@ -1629,6 +1896,7 @@
             importedDatasetName = file.name;
             datasetSource = "custom";
             setPointRangeFromDataset(importedDataset, { force: true });
+            syncPointRangeWithCurrentFixedAxes({ rerender: false });
             if (datasetStore && typeof datasetStore.save === "function") {
               datasetStore.save({
                 name: importedDatasetName,
@@ -1662,6 +1930,7 @@
           importedDatasetName = storedSelection.name || "インポートデータ";
           datasetSource = "custom";
           setPointRangeFromDataset(importedDataset, { force: true });
+          syncPointRangeWithCurrentFixedAxes({ rerender: false });
           updateDatasetLabel();
           statusEl.textContent = `${importedDatasetName} を読み込みました。学習を実行します...`;
           await trainCurrentDataset();
@@ -1674,6 +1943,7 @@
           importedDatasetName = "";
           datasetSource = "dummy";
           setPointRangeFromDataset({ axis_bounds: DEFAULT_DUMMY_BOUNDS }, { force: true });
+          syncPointRangeWithCurrentFixedAxes({ rerender: false });
           if (fileInput) {
             fileInput.value = "";
           }
@@ -1734,7 +2004,10 @@
             statusEl.textContent = "学習結果を読み込み中...";
             const sessionData = JSON.parse(savedData);
             await pyodideReadyPromise;
-            await callWorker("importSession", { sessionData });
+            const importedSession = await callWorker("importSession", {
+              sessionData,
+              denormalizeAfterPredict: shouldDenormalizeAfterPredict(),
+            });
 
             // Update UI state
             sessionReady = true;
@@ -1744,21 +2017,13 @@
             setAxisControlsDisabled(false);
 
             // Extract dataset info from imported session
-            if (sessionData.dataset && sessionData.dataset.length > 0) {
-              const points = sessionData.dataset.map(([point, value]) => point);
-              const values = sessionData.dataset.map(([point, value]) => value);
-              latestDataset = { points, values };
-
-              // Set point range from imported bounds
-              if (sessionData.axis_bounds && sessionData.axis_bounds.length === 3) {
-                const [xBounds, yBounds, zBounds] = sessionData.axis_bounds;
-                currentPointRange = {
-                  x: { min: xBounds[0], max: xBounds[1] },
-                  y: { min: yBounds[0], max: yBounds[1] },
-                  z: { min: zBounds[0], max: zBounds[1] },
-                };
-                defaultPointRange = JSON.parse(JSON.stringify(currentPointRange));
+            if (importedSession && importedSession.dataset) {
+              latestDataset = importedSession.dataset;
+              setPointRangeFromDataset(latestDataset, { force: true });
+              if (Array.isArray(latestDataset.axis_bounds)) {
+                setFixedDefaultsFromBounds(latestDataset.axis_bounds, { force: true });
               }
+              syncPointRangeWithCurrentFixedAxes({ rerender: false });
             }
 
             statusEl.textContent = "学習結果を読み込みました。ラインを計算ボタンでpredictを実行してください。";
@@ -2357,19 +2622,29 @@
             lineAxis: axis,
             fixedValues: fixedPayload,
             lineResolution: getLineResolutionPayload(),
+            denormalizeAfterPredict: shouldDenormalizeAfterPredict(),
             algorithmConfigs: currentAlgoConfigs,
           });
+          const preservedPointRange =
+            readPointRangeInputs() || cloneRange(getActivePointRange());
           latestLineResults = Array.isArray(result.line_results) ? result.line_results : [];
           latestSummaries = Array.isArray(result.summaries) ? result.summaries : [];
           latestDataset = result.dataset || null;
           setPointRangeFromDataset(latestDataset, { force: false });
-          renderTableRows(latestSummaries);
-          renderLinePlots(latestLineResults);
-          applyFixedAxesFromResult(result.fixed_axes);
-          if (lineAxisSelect && result.line_axis) {
-            lineAxisSelect.value = result.line_axis;
+          const varyingAxisFromResult = result.line_axis || axis;
+          if (lineAxisSelect) {
+            lineAxisSelect.value = varyingAxisFromResult;
             updateFixedControlsState();
           }
+          applyFixedAxesFromResult(result.fixed_axes);
+          syncPointRangeWithCurrentFixedAxes({
+            varyingAxis: varyingAxisFromResult,
+            fixedValues: result.fixed_axes,
+            baseRange: preservedPointRange,
+            rerender: false,
+          });
+          renderTableRows(latestSummaries);
+          renderLinePlots(latestLineResults);
           if (lineResolutionInput && Number.isFinite(result.line_resolution)) {
             lineResolutionInput.value = String(result.line_resolution);
           }
@@ -2428,13 +2703,21 @@
           statusEl.textContent = `${label} を用いて学習中...`;
           try {
             await pyodideReadyPromise;
-            const normalizeToggle = document.getElementById("normalize-toggle");
             const normalizeFlag = normalizeToggle ? normalizeToggle.checked : false;
-            await callWorker("fit", {
+            const fitResult = await callWorker("fit", {
               dataset: datasetSource === "custom" ? importedDataset : null,
               normalize: normalizeFlag,
+              denormalizeAfterPredict: shouldDenormalizeAfterPredict(),
               algorithmConfigs: currentAlgoConfigs,
             });
+            if (fitResult && fitResult.dataset) {
+              latestDataset = fitResult.dataset;
+              setPointRangeFromDataset(latestDataset, { force: true });
+              if (Array.isArray(latestDataset.axis_bounds)) {
+                setFixedDefaultsFromBounds(latestDataset.axis_bounds, { force: true });
+              }
+              syncPointRangeWithCurrentFixedAxes({ rerender: false });
+            }
             sessionReady = true;
             const normalizeNote = normalizeFlag ? "（正規化あり）" : "";
             statusEl.textContent = `${label} の学習が完了しました${normalizeNote}。滑らかさ計算ボタンでRMSE・滑らかさを計算できます。`;
@@ -2484,6 +2767,11 @@
 
       if (buttonEl) {
         buttonEl.addEventListener("click", () => runLinePrediction());
+      }
+      if (denormalizeAfterPredictToggle) {
+        denormalizeAfterPredictToggle.addEventListener("change", () => {
+          syncDisplaySpaceFromToggle();
+        });
       }
       if (lineAxisSelect) {
         lineAxisSelect.addEventListener("change", () => {
